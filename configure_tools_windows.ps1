@@ -1,207 +1,605 @@
-## This tool will try to detect common cli tools and will configure the Netskope SSL certificate bundle.
-## Original Code by Dudu Akiva @ Netskope
-## Updated version: Kostya Maryan @ Bulwarx Ltd.
-## Date: 29/08/2024
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Configures the Netskope SSL certificate bundle as trusted by developer tools.
+.DESCRIPTION
+    Prompts for tenant details, downloads the certificate bundle, then patches every
+    Python installation found (certifi + pip), sets persistent environment variables,
+    and runs tool-specific config commands for Git, cURL, Node, AWS CLI, gcloud, etc.
+    Optionally writes a configured_tools.ps1 replay script in the current directory.
+#>
 
+# ─── TLS bypass for initial download (cert not trusted yet) ──────────────────
 
-
-##############
-## PARAMS ####
-##############
-# These parameters are optional. If they are not set the script runs in manual mode and asks
-# and request for a user prompt to proceed.
-$tenant_name = ""
-$cert_name = "netskope-cert-bundle.pem"
-$cert_dir = "C:\Netskope"
-$org_key = ""
-$recreate_cert = $true
-
-
-function Write-Log {
-    param(
-        [string]$message
-    )
-    $current_time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Write-Host "[$current_time] $message"
-}
-
-function Test-CommandExists {
-    param ($command)
-    $oldPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'stop'
-    try {
-        if (Get-Command $command) { 
-            $cmdType = (Get-Command $command).CommandType
-            if ($cmdType -eq "Alias") { return $false }
-            else { return $true }
-        }
-    } catch { return $false }
-    finally { $ErrorActionPreference = $oldPreference }
-}
-
-function Invoke-ConfigureTool {
-    param(
-        $toolName,
-        $versionCmd,
-        $getConfigCmd,
-        $setConfigCmd
-    )
-    
-    Write-Log "[$toolName] is installed"
-    Invoke-Expression $versionCmd
-    
-    $currentConfig = Invoke-Expression $getConfigCmd
-    if ($currentConfig -eq "$cert_dir\$cert_name") {
-        Write-Log "[$toolName] Already configured"
-    } else {
-        Invoke-Expression $setConfigCmd
-        Write-Log "[$toolName] Configured"
-    }
-}
-
-
-##############
-#### MAIN ####
-##############
-$current_time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-Write-Host "################################################################"
-Write-Host " Starting a new Netskope SSL Cert instance ($current_time) "
-Write-Host "################################################################"
-Write-Host
-Write-Log "Script parameters:"
-Write-Log "tenant_name: `t [$tenant_name]"
-Write-Log "org_key: `t`t [$org_key]"
-Write-Log "cert_name: `t [$cert_name]"
-Write-Log "cert_dir: `t [$cert_dir]"
-Write-Log "recreate_cert: `t [$recreate_cert]"
-Write-Log
-
-# Get tenant information to create certificate bundle
-if ([string]::IsNullOrEmpty($tenant_name)) {
-    $tenant_name = Read-Host "Please provide full tenant name (ex: mytenant.eu.goskope.com)"
-} else { Write-Log "Using configured tenant_name"}
-
-if ([string]::IsNullOrEmpty($org_key)) {
-    $org_key = Read-Host "Please provide tenant orgkey"
-} else { Write-Log "Using configured org_key"}
-
-# Set Certificate bundle name and location
-if ([string]::IsNullOrEmpty($cert_name)) {
-    $cert_name = Read-Host "Please provide certificate bundle name [netskope-cert-bundle.pem]"
-    if ([string]::IsNullOrEmpty($cert_name)) { $cert_name = "netskope-cert-bundle.pem" }
-} else { Write-Log "Using configured cert_name"}
-
-if ([string]::IsNullOrEmpty($cert_dir)) {
-    $cert_dir = Read-Host "Please provide certificate bundle location [C:\netskope]"
-    if ([string]::IsNullOrEmpty($cert_dir)) { $cert_dir = "C:\netskope" }
-} Else { Write-Log "Using configured cert_dir"}
-
-if (-not (Test-Path $cert_dir)) {
-    Write-Log "[$cert_dir] does not exist, creating it .."
-    New-Item -ItemType Directory -Path $cert_dir | Out-Null
-}
-
-# Check tenant reachability
-$statusCode = (Invoke-WebRequest -Uri "https://$tenant_name/locallogin" -ErrorAction SilentlyContinue).StatusCode 
-if ( $statusCode -eq 200 -or $statusCode -eq 307 -or $statusCode -eq 302 ) {
-    Write-Log "Tenant Reachable"
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    # PS 5.1: allow untrusted certs via ServicePointManager callback
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $skipTls = @{}
 } else {
-    Write-Log "[ERROR] Tenant Unreachable"
+    $skipTls = @{ SkipCertificateCheck = $true }
+}
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function Read-Default($prompt, $default) {
+    $v = Read-Host "$prompt [$default]"
+    if ([string]::IsNullOrWhiteSpace($v)) { $default } else { $v }
+}
+
+function Test-Cmd($name) {
+    $null -ne (Get-Command $name -ErrorAction SilentlyContinue)
+}
+
+function Set-PersistentEnvVar($name, $value) {
+    [Environment]::SetEnvironmentVariable($name, $value, [EnvironmentVariableTarget]::User)
+    Set-Item -Path "Env:\$name" -Value $value -ErrorAction SilentlyContinue
+}
+
+$configuredToolsFile = Join-Path $PSScriptRoot 'configured_tools.ps1'
+
+function Add-Replay($line) {
+    if ($createReplay) { Add-Content -Path $configuredToolsFile -Value $line }
+}
+
+# ─── Color helpers ────────────────────────────────────────────────────────────
+#   Write-Ok     green  — success / configured
+#   Write-Warn   yellow — already configured / skipped
+#   Write-Err    red    — error / access denied
+#   Write-Header cyan   — section header (adds blank line before)
+#   Write-Dim    gray   — not installed / N/A
+function Write-Ok($msg)     { Write-Host $msg -ForegroundColor Green }
+function Write-Warn($msg)   { Write-Host $msg -ForegroundColor Yellow }
+function Write-Err($msg)    { Write-Host $msg -ForegroundColor Red }
+function Write-Header($msg) { Write-Host ""; Write-Host $msg -ForegroundColor Cyan }
+function Write-Dim($msg)    { Write-Host $msg -ForegroundColor DarkGray }
+
+# ─── User inputs ──────────────────────────────────────────────────────────────
+
+$certName   = Read-Default 'Certificate bundle name'     'netskope-cert-bundle.pem'
+$certDir    = Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope')
+$certDir    = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))
+$certPath   = Join-Path $certDir $certName
+
+$tenantName = Read-Host 'Full tenant name (e.g. mytenant.eu.goskope.com)'
+$orgKey     = Read-Host 'Tenant orgkey'
+
+# ─── Create directory ────────────────────────────────────────────────────────
+
+if (-not (Test-Path $certDir)) {
+    Write-Warn "$certDir does not exist — creating it"
+    New-Item -ItemType Directory -Path $certDir -Force | Out-Null
+}
+
+# ─── Tenant reachability ──────────────────────────────────────────────────────
+
+try {
+    Invoke-WebRequest -Uri "https://$tenantName/locallogin" -UseBasicParsing @skipTls `
+                      -ErrorAction Stop | Out-Null
+    Write-Ok 'Tenant Reachable'
+} catch {
+    Write-Err "Tenant Unreachable: $_"
     exit 1
 }
 
-# Create or update certificate bundle
-$certBundleExists = Test-Path "$cert_dir\$cert_name"
-if ($certBundleExists) {
-    Write-Log "[$cert_name] already exists in [$cert_dir]."
-    
-    if ( $recreate_cert -eq $false ) {
-        $recreate = Read-Host "Recreate Certificate Bundle? (y/n)"
-        $certBundleExists = $recreate -ne "y"
+# ─── Cert bundle download ─────────────────────────────────────────────────────
+
+function New-CertBundle {
+    Write-Host 'Creating cert bundle...'
+    $urls = @(
+        "https://addon-$tenantName/config/ca/cert?orgkey=$orgKey"
+        "https://addon-$tenantName/config/org/cert?orgkey=$orgKey"
+        'https://curl.se/ca/cacert.pem'
+    )
+    if (Test-Path $certPath) {
+        Remove-Item -Path $certPath -Force -ErrorAction SilentlyContinue
+    }
+    [IO.File]::WriteAllBytes($certPath, [byte[]]@())
+    $stream = [IO.File]::Open($certPath, [IO.FileMode]::Append)
+    try {
+        foreach ($url in $urls) {
+            $bytes = (Invoke-WebRequest -Uri $url -UseBasicParsing @skipTls).Content
+            $stream.Write($bytes, 0, $bytes.Length)
+        }
+    } finally {
+        $stream.Close()
+    }
+    Write-Ok "Cert bundle saved: $certPath"
+}
+
+$certWasRecreated = $false
+if (Test-Path $certPath) {
+    Write-Warn "$certName already exists in $certDir."
+    $recreate = Read-Host 'Recreate Certificate Bundle? (y/N)'
+    if ($recreate -ieq 'y') { New-CertBundle; $certWasRecreated = $true }
+} else {
+    New-CertBundle
+    $certWasRecreated = $true
+}
+
+$createReplay = (Read-Host 'Create replay script (configured_tools.ps1)? [y/N]') -ieq 'y'
+if ($createReplay) {
+    Set-Content -Path $configuredToolsFile -Value '# Netskope SSL configuration - replay script'
+    Write-Ok "Replay script: $configuredToolsFile"
+}
+
+# ─── Windows Certificate Store ───────────────────────────────────────────────
+
+Write-Header "Windows Certificate Store"
+
+$certContent = Get-Content $certPath -Raw -ErrorAction SilentlyContinue
+if ($certContent -match '-----BEGIN CERTIFICATE-----\s*([\s\S]*?)\s*-----END CERTIFICATE-----') {
+    $b64 = $Matches[1] -replace '\s', ''
+    try {
+        $x509 = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+            ,[Convert]::FromBase64String($b64))
+        $thumb = $x509.Thumbprint
+        $inStore = @(
+            Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root -ErrorAction SilentlyContinue |
+            Where-Object { $_.Thumbprint -eq $thumb }
+        ).Count -gt 0
+        if ($inStore) {
+            Write-Warn "  already configured (certificate found in store)"
+        } else {
+            Write-Host "  importing certificate into Windows store..."
+            certutil -addstore -f Root $certPath 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "  configured (imported into LocalMachine\Root)"
+                Add-Replay "certutil -addstore -f Root `"$certPath`""
+            } else {
+                certutil -addstore -f -user Root $certPath 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Ok "  configured (imported into CurrentUser\Root)"
+                    Add-Replay "certutil -addstore -f -user Root `"$certPath`""
+                } else {
+                    Write-Err "  access denied — rerun as Administrator to import into machine store"
+                }
+            }
+        }
+    } catch {
+        Write-Err "  could not check certificate store: $_"
+    }
+} else {
+    Write-Err "  no PEM certificate found in bundle"
+}
+
+# ─── Python: find all installations ──────────────────────────────────────────
+
+function Get-AllPythons {
+    $found = [ordered]@{}  # normcase(path) => @(path, label)
+
+    # Python Launcher — most reliable on Windows
+    if (Test-Cmd 'py') {
+        py --list-paths 2>$null | ForEach-Object {
+            if ($_ -match '(-V:\S+)\s+\*?\s+(.*python\.exe)') {
+                $path = $Matches[2].Trim()
+                if (Test-Path $path) {
+                    $found[$path.ToLower()] = @($path, $Matches[1])
+                }
+            }
+        }
+    }
+
+    # Fallback: all 'python' entries on PATH
+    where.exe python 2>$null | ForEach-Object {
+        $p = $_.Trim()
+        if ($p -and (Test-Path $p) -and -not $found.Contains($p.ToLower())) {
+            $found[$p.ToLower()] = @($p, 'python')
+        }
+    }
+
+    # Bundled Pythons detected from tool output
+    @(
+        @{ Cmd = 'az'; Args = '--version'; Pattern = "Python location '(.+python\.exe)'"; Label = 'Azure CLI' }
+    ) | ForEach-Object {
+        $src = $_
+        if (Test-Cmd $src.Cmd) {
+            $out = & $src.Cmd $src.Args 2>$null | Out-String
+            if ($out -match $src.Pattern) {
+                $path = $Matches[1]
+                if ((Test-Path $path) -and -not $found.Contains($path.ToLower())) {
+                    $found[$path.ToLower()] = @($path, $src.Label)
+                }
+            }
+        }
+    }
+
+    return $found.Values
+}
+
+function Set-PythonSslCert($pythonExe, $label, $certWasRecreated = $false) {
+    Write-Host ""
+    Write-Host "  " -NoNewline
+    Write-Host "[$label]" -ForegroundColor Cyan -NoNewline
+    Write-Host " $pythonExe"
+
+    # certifi — append with a marker so re-runs are idempotent; re-patch when cert was recreated
+    $certifiBundle = & $pythonExe -c 'import certifi; print(certifi.where())' 2>$null
+    if ($LASTEXITCODE -eq 0 -and $certifiBundle) {
+        $certifiBundle = $certifiBundle.Trim()
+        $existing  = [IO.File]::ReadAllBytes($certifiBundle)
+        $markerStr = "`n# Netskope SSL bundle"
+        $markerBytes = [Text.Encoding]::UTF8.GetBytes($markerStr)
+        # Search for marker
+        $markerIdx = -1
+        for ($mi = 0; $mi -le $existing.Length - $markerBytes.Length; $mi++) {
+            $match = $true
+            for ($mj = 0; $mj -lt $markerBytes.Length; $mj++) {
+                if ($existing[$mi + $mj] -ne $markerBytes[$mj]) { $match = $false; break }
+            }
+            if ($match) { $markerIdx = $mi; break }
+        }
+        $hadMarker = $markerIdx -ge 0
+        if ($hadMarker -and -not $certWasRecreated) {
+            Write-Warn "    certifi: already configured ($certifiBundle)"
+        } else {
+            # Strip old Netskope bundle if present, then re-append fresh cert
+            if ($hadMarker) { $existing = $existing[0..($markerIdx - 1)] }
+            try {
+                [IO.File]::WriteAllBytes($certifiBundle, $existing)
+                $stream = [IO.File]::Open($certifiBundle, [IO.FileMode]::Append)
+                $marker = [Text.Encoding]::UTF8.GetBytes("`n# Netskope SSL bundle`n")
+                $cert   = [IO.File]::ReadAllBytes($certPath)
+                $stream.Write($marker, 0, $marker.Length)
+                $stream.Write($cert, 0, $cert.Length)
+                $stream.Close()
+                $action = if ($hadMarker) { 'updated' } else { 'configured' }
+                Write-Ok "    certifi: $action ($certifiBundle)"
+                Add-Replay "# certifi patch for $pythonExe"
+                Add-Replay "Add-Content -Path `"$certifiBundle`" -Value (Get-Content -Path `"$certPath`" -Raw)"
+            } catch [System.UnauthorizedAccessException] {
+                Write-Err "    certifi: access denied — rerun as Administrator to patch $certifiBundle"
+            } catch {
+                Write-Err "    certifi: failed — $_"
+            }
+        }
+    } else {
+        Write-Dim "    certifi: not installed"
+    }
+
+    # pip global cert
+    & $pythonExe -m pip --version *>$null
+    if ($LASTEXITCODE -eq 0) {
+        & $pythonExe -m pip config set global.cert $certPath *>$null
+        Write-Ok "    pip: configured"
+        Add-Replay "`"$pythonExe`" -m pip config set global.cert `"$certPath`""
+    } else {
+        Write-Dim "    pip: not installed"
+    }
+
+    # requests — informational (REQUESTS_CA_BUNDLE env var covers it)
+    $reqVer = & $pythonExe -c 'import requests; print(requests.__version__)' 2>$null
+    if ($LASTEXITCODE -eq 0 -and $reqVer) {
+        Write-Dim "    requests $($reqVer.Trim()): present (covered by REQUESTS_CA_BUNDLE)"
     }
 }
 
-if ( (-not $certBundleExists) -or $recreate_cert -eq $true ) {
-    $fileRootCA = "$cert_dir\$cert_name.rootca"
-    $fileSubCA  = "$cert_dir\$cert_name.subca"
-    $fileGlobal = "$cert_dir\$cert_name.globalcas"
-
-    Write-Log "Creating cert bundle"
-    Invoke-WebRequest -Uri "https://addon-$tenant_name/config/ca/cert?orgkey=$org_key" -OutFile $fileRootCA
-    Invoke-WebRequest -Uri "https://addon-$tenant_name/config/org/cert?orgkey=$org_key" -OutFile $fileSubCA
-    Invoke-WebRequest -Uri "https://ccadb-public.secure.force.com/mozilla/IncludedRootsPEMTxt?TrustBitsInclude=Websites" -OutFile $fileGlobal
-    
-    Get-Content $fileRootCA, $fileSubCA, $fileGlobal | Out-File -FilePath "$cert_dir\$cert_name" -Encoding utf8
-    Get-Content $fileSubCA, $fileRootCA | Out-File -FilePath "$cert_dir\netskope_only.pem" -Encoding utf8
-    $filesToDelete = @($fileRootCA, $fileSubCA, $fileGlobal) 
-    Remove-Item -Path $filesToDelete
-}
-
-# Tools configuration (add more tools here as needed)
-# Git
-$tool_name = "Git"
-Write-Log "[$tool_name] checking if tool is installed"
-if (Test-CommandExists "git") {
-    Write-log "[$tool_name] Configuring tool"
-    Invoke-ConfigureTool "$tool_name" "git --version" "git config --global http.sslCAInfo" "git config --global http.sslCAInfo `"$cert_dir\$cert_name`""
-}
-
-# OpenSSL
-$tool_name = "OpenSSL"
-Write-Log "[$tool_name] checking if tool is installed"
-if (Test-CommandExists "openssl") {
-    Write-log "[$tool_name] Configuring tool"
-    Invoke-ConfigureTool "$tool_name" "openssl version -a" "[Environment]::GetEnvironmentVariable('SSL_CERT_FILE', 'User')" "[Environment]::SetEnvironmentVariable('SSL_CERT_FILE', '$cert_dir\$cert_name', 'User')"
-}
-
-# Curl
-$tool_name = "cURL"
-Write-Log "[$tool_name] checking if tool is installed"
-if (Test-CommandExists "curl") {
-    Write-log "[$tool_name] Configuring tool"
-    Invoke-ConfigureTool "$tool_name" "curl --version" "[Environment]::GetEnvironmentVariable('SSL_CERT_FILE', 'User')" "[Environment]::SetEnvironmentVariable('SSL_CERT_FILE', '$cert_dir\$cert_name', 'User')"
-}
-
-# AWS CLI
-$tool_name = "cURL"
-Write-Log "[$tool_name] checking if tool is installed"
-if (Test-CommandExists "aws") {
-    Write-log "[$tool_name] Configuring tool"
-    Invoke-ConfigureTool "$tool_name" "aws --version" "[Environment]::GetEnvironmentVariable('AWS_CA_BUNDLE', 'User')" "[Environment]::SetEnvironmentVariable('AWS_CA_BUNDLE', '$cert_dir\$cert_name', 'User')"
-}
-
-# Node JS
-$tool_name = "Node JS Extra Certs"
-Write-log "[$tool_name] Configuring tool"
-[Environment]::SetEnvironmentVariable('NODE_EXTRA_CA_CERTS', "$cert_dir\$cert_name", 'User')
-
-# Python Requests
-$tool_name = "Python Requests"
-Write-Log "[$tool_name] checking if tool is installed"
-$pythonRequestsBundle = [Environment]::GetEnvironmentVariable('REQUESTS_CA_BUNDLE', 'User')
-if ($pythonRequestsBundle -eq "$cert_dir\$cert_name") {
-    Write-log "[$tool_name] Tool already configured, skipping .."
+Write-Header "Python installations"
+$allPythons = @(Get-AllPythons)
+if ($allPythons.Count -gt 0) {
+    foreach ($entry in $allPythons) {
+        Set-PythonSslCert $entry[0] $entry[1] $certWasRecreated
+    }
+    Write-Host ""
+    Set-PersistentEnvVar 'REQUESTS_CA_BUNDLE' $certPath
+    Write-Ok "REQUESTS_CA_BUNDLE set globally"
+    Add-Replay "[Environment]::SetEnvironmentVariable('REQUESTS_CA_BUNDLE', `"$certPath`", 'User')"
 } else {
-    [Environment]::SetEnvironmentVariable('REQUESTS_CA_BUNDLE', "$cert_dir\$cert_name", 'User')
-    Write-Log "[$tool_name] Tool configured"
+    Write-Dim "  No Python installations found"
 }
+
+# ─── Tool configuration ───────────────────────────────────────────────────────
+
+function Set-ToolSslCert($toolName, $envVar, $checkCmd, $postCmd = $null) {
+    Write-Host ""
+    if (Test-Cmd $checkCmd) {
+        Write-Host "$toolName is installed"
+        & $checkCmd --version
+        if ($envVar) {
+            $current = [Environment]::GetEnvironmentVariable($envVar, [EnvironmentVariableTarget]::User)
+            if ($current -eq $certPath) {
+                Write-Warn "$toolName already configured"
+            } else {
+                Set-PersistentEnvVar $envVar $certPath
+                Write-Ok "$toolName configured"
+                Add-Replay "[Environment]::SetEnvironmentVariable('$envVar', `"$certPath`", 'User')"
+            }
+        }
+        if ($postCmd) {
+            Invoke-Expression $postCmd
+            Add-Replay $postCmd
+        }
+    } else {
+        Write-Dim "$toolName is not installed"
+    }
+}
+
+# Git — uses git config, not an env var, on Windows
+Write-Host ""
+if (Test-Cmd 'git') {
+    Write-Host "Git is installed"
+    git --version
+    $current = git config --global http.sslCAInfo
+    if ($current -eq $certPath) {
+        Write-Warn "Git already configured"
+    } else {
+        git config --global http.sslCAInfo $certPath
+        Write-Ok "Git configured"
+        Add-Replay "git config --global http.sslCAInfo `"$certPath`""
+    }
+} else { Write-Dim "Git is not installed" }
+
+Set-ToolSslCert 'OpenSSL' 'SSL_CERT_FILE' 'openssl'
+
+# cURL — write .curlrc (works for both OpenSSL and Schannel curl)
+Write-Host ""
+if (Test-Cmd 'curl') {
+    Write-Host "cURL is installed"
+    curl --version
+    $curlrc = Join-Path $env:USERPROFILE '.curlrc'
+    "--cacert `"$certPath`"" | Set-Content -Path $curlrc -Encoding ASCII
+    Write-Ok "cURL configured ($curlrc)"
+    Add-Replay "Set-Content -Path `"$curlrc`" -Value `"--cacert \`"$certPath\`"`" -Encoding ASCII"
+} else { Write-Dim "cURL is not installed" }
+
+Set-ToolSslCert 'AWS CLI'   'AWS_CA_BUNDLE'       'aws'
+Set-ToolSslCert 'NodeJS'    'NODE_EXTRA_CA_CERTS'  'node'
 
 # Google Cloud CLI
-$tool_name = "Google Cloud CLI"
-Write-Log "[$tool_name] Checking if tool is installed"
-if (Test-CommandExists "gcloud") {
-    Write-Log "[$tool_name] Tool is installed"
+Write-Host ""
+if (Test-Cmd 'gcloud') {
+    Write-Host "Google Cloud CLI is installed"
     gcloud --version
-    gcloud config set core/custom_ca_certs_file "$cert_dir\$cert_name"
-    Write-Log "[$tool_name] Tool configured"
-} else {
-    Write-Log "[$tool_name] Tool is not installed"
+    gcloud config set core/custom_ca_certs_file $certPath
+    Write-Ok "Google Cloud CLI configured"
+    Add-Replay "gcloud config set core/custom_ca_certs_file `"$certPath`""
+} else { Write-Dim "Google Cloud CLI is not installed" }
+
+# NPM
+Write-Host ""
+if (Test-Cmd 'npm') {
+    Write-Host "NodeJS Package Manager (NPM) is installed"
+    npm --version
+    npm config set cafile $certPath
+    Write-Ok "NodeJS Package Manager (NPM) configured"
+    Add-Replay "npm config set cafile `"$certPath`""
+} else { Write-Dim "NodeJS Package Manager (NPM) is not installed" }
+
+Set-ToolSslCert 'Ruby'    'SSL_CERT_FILE' 'ruby'
+
+# PHP Composer
+Write-Host ""
+if (Test-Cmd 'composer') {
+    Write-Host "PHP Composer is installed"
+    composer --version
+    composer config --global cafile $certPath
+    Write-Ok "PHP Composer configured"
+    Add-Replay "composer config --global cafile `"$certPath`""
+} else { Write-Dim "PHP Composer is not installed" }
+
+Set-ToolSslCert 'GoLang'           'SSL_CERT_FILE'      'go'
+Set-ToolSslCert 'Azure CLI'        'REQUESTS_CA_BUNDLE'  'az'
+Set-ToolSslCert 'Oracle Cloud CLI' 'REQUESTS_CA_BUNDLE'  'oci'
+
+# Cargo — needs two env vars
+Write-Host ""
+if (Test-Cmd 'cargo') {
+    Write-Host "Cargo Package Manager is installed"
+    cargo --version
+    Set-PersistentEnvVar 'SSL_CERT_FILE'  $certPath
+    Set-PersistentEnvVar 'GIT_SSL_CAPATH' $certPath
+    Write-Ok "Cargo Package Manager configured"
+    Add-Replay "[Environment]::SetEnvironmentVariable('SSL_CERT_FILE',  `"$certPath`", 'User')"
+    Add-Replay "[Environment]::SetEnvironmentVariable('GIT_SSL_CAPATH', `"$certPath`", 'User')"
+} else { Write-Dim "Cargo Package Manager is not installed" }
+
+# Yarn
+Write-Host ""
+if (Test-Cmd 'yarn') {
+    Write-Host "Yarn is installed"
+    yarn --version
+    yarn config set cafile $certPath
+    Write-Ok "Yarn configured"
+    Add-Replay "yarn config set cafile `"$certPath`""
+} else { Write-Dim "Yarn is not installed" }
+
+# Azure Storage Explorer
+Write-Host ""
+$storageExplorerCerts = Join-Path $env:APPDATA 'StorageExplorer\certs'
+if (Test-Path $storageExplorerCerts) {
+    Write-Host "Azure Storage Explorer is installed"
+    Copy-Item -Path $certPath -Destination $storageExplorerCerts -Force
+    Write-Ok "Azure Storage Explorer configured"
+    Add-Replay "Copy-Item -Path `"$certPath`" -Destination `"$storageExplorerCerts`" -Force"
+} else { Write-Dim "Azure Storage Explorer is not installed" }
+
+# ─── Java JDK ────────────────────────────────────────────────────────────────
+
+function Get-AllJDKs {
+    $found = [ordered]@{}  # normcase(home) => @(home, label)
+
+    function Add-JDK($jdkPath, $label) {
+        if (-not $jdkPath -or -not (Test-Path $jdkPath -PathType Container)) { return }
+        $keytool = Join-Path $jdkPath 'bin\keytool.exe'
+        if ((Test-Path $keytool) -and -not $found.Contains($jdkPath.ToLower())) {
+            $found[$jdkPath.ToLower()] = @($jdkPath, $label)
+        }
+    }
+
+    if ($env:JAVA_HOME) { Add-JDK $env:JAVA_HOME 'JAVA_HOME' }
+
+    $kt = Get-Command keytool -ErrorAction SilentlyContinue
+    if ($kt) { Add-JDK (Split-Path (Split-Path $kt.Source)) 'PATH' }
+
+    @(
+        'HKLM:\SOFTWARE\JavaSoft\JDK',
+        'HKLM:\SOFTWARE\WOW6432Node\JavaSoft\JDK'
+    ) | ForEach-Object {
+        if (Test-Path $_) {
+            Get-ChildItem $_ -ErrorAction SilentlyContinue | ForEach-Object {
+                $javaHome = (Get-ItemProperty $_.PSPath -Name JavaHome -ErrorAction SilentlyContinue).JavaHome
+                if ($javaHome) { Add-JDK $javaHome "Registry ($($_.PSChildName))" }
+            }
+        }
+    }
+
+    $progFiles = $env:ProgramFiles
+    @('Java','Eclipse Adoptium','Amazon Corretto','Zulu','Microsoft') | ForEach-Object {
+        $parent = Join-Path $progFiles $_
+        if (Test-Path $parent) {
+            Get-ChildItem $parent -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                Add-JDK $_.FullName "Common ($($_.Name))"
+            }
+        }
+    }
+
+    return $found.Values
 }
 
-# ... Continue with other tools (npm, node, ruby, composer, go, az, pip, oci, cargo, yarn) ...
-# The pattern would be similar to the examples above, adjusting for each tool's specific commands and environment variables.
+function Set-JavaSslCert($jdkHome, $label, $certWasRecreated = $false) {
+    Write-Host ""
+    Write-Host "  " -NoNewline
+    Write-Host "[$label]" -ForegroundColor Cyan -NoNewline
+    Write-Host " $jdkHome"
 
-Write-Host
-Write-Host "################################################################"
-Write-Host " Netskope SSL Cert instance finished successfully ($current_time) "
-Write-Host "################################################################"
+    $cacerts = Join-Path $jdkHome 'lib\security\cacerts'
+    if (-not (Test-Path $cacerts)) { $cacerts = Join-Path $jdkHome 'jre\lib\security\cacerts' }
+    if (-not (Test-Path $cacerts)) { Write-Err "    cacerts: not found"; return }
+
+    $keytool   = Join-Path $jdkHome 'bin\keytool.exe'
+    $storepass = 'changeit'
+
+    $certText  = Get-Content $certPath -Raw
+    $pemBlocks = [regex]::Matches($certText, '-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----') |
+                 Select-Object -First 2
+
+    if ($pemBlocks.Count -eq 0) { Write-Err "    keytool: no PEM blocks found in bundle"; return }
+
+    for ($i = 0; $i -lt $pemBlocks.Count; $i++) {
+        $alias = "netskope-$i"
+        & $keytool -list -alias $alias -keystore $cacerts -storepass $storepass *>$null
+        if ($LASTEXITCODE -eq 0) {
+            if (-not $certWasRecreated) {
+                Write-Warn "    keytool alias ${alias}: already configured"
+                continue
+            }
+            # cert bundle was recreated — delete stale alias to re-import fresh cert
+            Write-Warn "    keytool alias ${alias}: removing stale entry to re-import"
+            & $keytool -delete -alias $alias -keystore $cacerts -storepass $storepass *>$null
+        }
+        $tmp = [IO.Path]::GetTempFileName() + '.pem'
+        try {
+            [IO.File]::WriteAllText($tmp, $pemBlocks[$i].Value)
+            & $keytool -import -trustcacerts -noprompt -alias $alias -file $tmp `
+                       -keystore $cacerts -storepass $storepass *>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok "    keytool alias ${alias}: configured"
+                Add-Replay "# Java keytool import for $jdkHome alias $alias"
+                Add-Replay "`"$keytool`" -import -trustcacerts -noprompt -alias $alias -file `"$certPath`" -keystore `"$cacerts`" -storepass $storepass"
+            } else {
+                Write-Err "    keytool alias ${alias}: failed"
+            }
+        } catch [System.UnauthorizedAccessException] {
+            Write-Err "    keytool: access denied — rerun as Administrator to patch $cacerts"
+        } catch {
+            Write-Err "    keytool: error — $_"
+        } finally {
+            if (Test-Path $tmp) { Remove-Item $tmp -Force }
+        }
+    }
+}
+
+Write-Header "Java installations"
+$allJDKs = @(Get-AllJDKs)
+if ($allJDKs.Count -gt 0) {
+    foreach ($entry in $allJDKs) { Set-JavaSslCert $entry[0] $entry[1] $certWasRecreated }
+} else {
+    Write-Dim "  No Java installations found"
+}
+
+# ─── VS Code ──────────────────────────────────────────────────────────────────
+
+Write-Header "VS Code"
+@(
+    @{ Dir = "$env:APPDATA\Code\User";            Edition = 'VS Code' }
+    @{ Dir = "$env:APPDATA\Code - Insiders\User"; Edition = 'VS Code Insiders' }
+) | ForEach-Object {
+    $settingsDir  = $_.Dir
+    $edition      = $_.Edition
+    $settingsFile = Join-Path $settingsDir 'settings.json'
+    if (-not (Test-Path $settingsDir)) { return }
+    try {
+        if (Test-Path $settingsFile) {
+            $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
+        } else {
+            $settings = New-Object PSObject
+        }
+        if ($settings.PSObject.Properties['http.systemCertificates'] -and
+            $settings.'http.systemCertificates' -eq $true) {
+            Write-Warn "  ${edition}: already configured"
+        } else {
+            $settings | Add-Member -NotePropertyName 'http.systemCertificates' -NotePropertyValue $true -Force
+            $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
+            Write-Ok "  ${edition}: configured"
+            Add-Replay "# VS Code: set http.systemCertificates in $settingsFile"
+        }
+    } catch {
+        Write-Err "  ${edition}: failed — $_"
+    }
+}
+if (-not (Test-Path "$env:APPDATA\Code\User") -and -not (Test-Path "$env:APPDATA\Code - Insiders\User")) {
+    Write-Dim "  VS Code is not installed"
+}
+
+# ─── .NET / NuGet ─────────────────────────────────────────────────────────────
+
+Write-Header ".NET / NuGet"
+$dotnetFound = $false
+foreach ($dotnetCmd in @('dotnet', 'nuget')) {
+    if (Test-Cmd $dotnetCmd) {
+        $ver = (& $dotnetCmd --version 2>$null)
+        Write-Ok "  $dotnetCmd $ver — covered by Windows Certificate Store"
+        Add-Replay "# ${dotnetCmd}: covered by Windows Certificate Store"
+        $dotnetFound = $true
+    }
+}
+if (-not $dotnetFound) { Write-Dim "  .NET / NuGet is not installed" }
+
+# ─── Docker Desktop ───────────────────────────────────────────────────────────
+
+Write-Header "Docker Desktop"
+$dockerInstalled = (Test-Cmd 'docker') -or (Test-Path "$env:LOCALAPPDATA\Docker\Desktop")
+if (-not $dockerInstalled) {
+    Write-Dim "  Docker is not installed"
+} else {
+    $dockerDir = Join-Path $env:USERPROFILE '.docker'
+    $dockerCa  = Join-Path $dockerDir 'ca.pem'
+    $alreadyOk = $false
+    if (Test-Path $dockerCa) {
+        $alreadyOk = ((Get-FileHash $dockerCa).Hash -eq (Get-FileHash $certPath).Hash)
+    }
+    if ($alreadyOk) {
+        Write-Warn "  already configured"
+    } else {
+        if (-not (Test-Path $dockerDir)) { New-Item -ItemType Directory $dockerDir -Force | Out-Null }
+        try {
+            Copy-Item $certPath $dockerCa -Force
+            Write-Ok "  configured ($dockerCa)"
+            Write-Host "  Note: restart Docker Desktop to apply changes"
+            Add-Replay "Copy-Item -Path `"$certPath`" -Destination `"$dockerCa`" -Force"
+        } catch [System.UnauthorizedAccessException] {
+            Write-Err "  access denied — could not write to $dockerCa"
+        }
+    }
+}
+
+Write-Host ""
+if ($createReplay) { Write-Ok "Done. Replay script: $configuredToolsFile" }
+else { Write-Ok "Done." }
+
+# ─── How to add a new tool ────────────────────────────────────────────────────
+# Tool that uses an environment variable:
+#   Set-ToolSslCert 'MyTool' 'MYTOOL_CA_CERTS' 'mytool'
+#
+# Tool that also needs a post-config command:
+#   Set-ToolSslCert 'MyTool' $null 'mytool' "mytool config set cafile `"$certPath`""
