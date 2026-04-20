@@ -47,9 +47,18 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 - **.NET / NuGet** — covered by the Windows Certificate Store; detected and reported
 - **Docker Desktop** — copies the bundle to `~/.docker/ca.pem`
 
+## Requirements
+- Python 3 (for the universal script; platform-specific scripts are standalone)
+- OpenSSL CLI (for cert parsing; bundled with Windows scripts)
+
+```
+pip install -r requirements.txt  # install dependencies for the Python script
+``` 
+
 ## Quick Start
 
-Run one script for your platform:
+Run one script for your platform, it is recommended to use the *Universal_configure_tools.py* for the broadest coverage and consistent experience across platforms. The script will prompt for your Netskope tenant name, org key, and desired certificate bundle location (with sensible defaults). It will then download the certs, create the bundle, and apply configuration to all detected tools.
+
 
 ```sh
 # Linux
@@ -118,7 +127,7 @@ The PowerShell script supports pre-set parameters at the top of the file for ful
 $tenantName   = "mytenant.eu.goskope.com"
 $orgKey       = "your-org-key"
 $certName     = "netskope-cert-bundle.pem"
-$certDir      = "C:\netskope"
+$certDir      = "C:\Users\username\netskope\"
 $recreateCert = $false   # set $true to force re-download on every run
 $rollback     = $false   # set $true to undo all Netskope SSL configuration
 $fullBundle   = $false   # set $true to append the public curl.se CA bundle
