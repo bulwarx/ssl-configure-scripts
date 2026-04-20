@@ -7,11 +7,9 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 ## What These Scripts Do
 
 1. Prompt for tenant details and bundle location (or use pre-set parameters for silent deployment).
-2. Download and create a certificate bundle — tenant certs + public CA roots (`curl.se/ca/cacert.pem`).
+2. Download and create a certificate bundle — by default **Netskope-only** (RootCA + SubCA). Pass `--full-bundle` to also append the public `curl.se/ca/cacert.pem` CA roots.
 3. Detect installed tools and apply SSL certificate configuration automatically.
 4. Optionally generate a replay script with the applied configuration commands for re-use on other machines.
-
-A `netskope_only.pem` file is also created alongside the main bundle (Windows PS1 / Python), containing only the Netskope SubCA and RootCA without the public CA bundle.
 
 ## Scripts Included
 
@@ -70,6 +68,48 @@ configure_tools_windows.cmd
 python universal_configure_tools.py
 ```
 
+### Full bundle (optional)
+
+By default the bundle contains only the two Netskope certs (RootCA + SubCA). Pass `--full-bundle` to also append the public `curl.se/ca/cacert.pem` CA roots. In full-bundle mode a `netskope_only.pem` sidecar is also written alongside the main bundle (PS1 and Python only).
+
+```sh
+# Linux / macOS
+./configure_tools_linux.sh --full-bundle
+./configure_tools_mac.sh --full-bundle
+
+# Windows CMD
+configure_tools_windows.cmd full-bundle
+
+# Windows PowerShell — set in the pre-set params block at the top of the file
+# $fullBundle = $true
+
+# Python
+python universal_configure_tools.py --full-bundle
+```
+
+## Rollback
+
+Every script supports a rollback mode that removes all Netskope SSL configuration — no certificate bundle required.
+
+```sh
+# Linux
+./configure_tools_linux.sh --rollback
+
+# macOS
+./configure_tools_mac.sh --rollback
+
+# Windows CMD
+configure_tools_windows.cmd rollback
+
+# Windows PowerShell — set $rollback = $true at the top of the file
+./configure_tools_windows.ps1
+
+# Any platform (Python 3)
+python universal_configure_tools.py --rollback
+```
+
+Rollback reverses: environment variables, Git, cURL `.curlrc`, gcloud, npm, Composer, Yarn, Python `certifi` marker + pip cert, Java keytool aliases (`netskope-0`, `netskope-1`), VS Code `http.systemCertificates`, Windows Certificate Store (matched by thumbprint, with subject/issuer fallback), and Docker `ca.pem`.
+
 ## Silent / Automated Deployment (PowerShell)
 
 The PowerShell script supports pre-set parameters at the top of the file for fully unattended deployment. Edit the parameter block before running:
@@ -80,6 +120,8 @@ $orgKey       = "your-org-key"
 $certName     = "netskope-cert-bundle.pem"
 $certDir      = "C:\netskope"
 $recreateCert = $false   # set $true to force re-download on every run
+$rollback     = $false   # set $true to undo all Netskope SSL configuration
+$fullBundle   = $false   # set $true to append the public curl.se CA bundle
 ```
 
 When all parameters are set the script runs without any interactive prompts.
@@ -98,4 +140,5 @@ Enhanced by the Bulwarx Ltd team:
 - Parameterized / silent deployment mode
 - ANSI color output and structured logging
 - Replay script support
-- Consistent use of `curl.se/ca/cacert.pem` across all scripts
+- Rollback support across all scripts
+- Netskope-only bundle by default (RootCA + SubCA, correct chain order); optional full public CA bundle via `--full-bundle`

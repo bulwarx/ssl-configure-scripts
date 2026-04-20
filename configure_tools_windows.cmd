@@ -10,6 +10,13 @@ set "CYN=%ESC%[96m"
 set "GRY=%ESC%[90m"
 set "RST=%ESC%[0m"
 
+:: Check for rollback mode
+if /i "%~1"=="rollback" goto :do_rollback
+
+:: Check for full-bundle mode (default: Netskope-only)
+set fullBundle=0
+for %%a in (%*) do if /i "%%a"=="full-bundle" set fullBundle=1
+
 :: Set Certificate bundle name and location
 set /p certName="Please provide certificate bundle name [netskope-cert-bundle.pem]:"
 if "%certName%"=="" set certName=netskope-cert-bundle.pem
@@ -52,9 +59,9 @@ if /i "%recreate%"=="y" (
     echo %CYN%Creating cert bundle...%RST%
     if exist "%certDir%\%certName%" del /f /q "%certDir%\%certName%" >NUL 2>&1
     type NUL > "%certDir%\%certName%"
-    curl -k "https://addon-%tenantName%/config/ca/cert?orgkey=%orgKey%" >> "%certDir%\%certName%"
     curl -k "https://addon-%tenantName%/config/org/cert?orgkey=%orgKey%" >> "%certDir%\%certName%"
-    curl -k -L "https://curl.se/ca/cacert.pem" >> "%certDir%\%certName%"
+    curl -k "https://addon-%tenantName%/config/ca/cert?orgkey=%orgKey%" >> "%certDir%\%certName%"
+    if "%fullBundle%"=="1" curl -k -L "https://curl.se/ca/cacert.pem" >> "%certDir%\%certName%"
     echo %GRN%Cert bundle created: %certDir%\%certName%%RST%
     set certWasRecreated=1
 )
@@ -269,6 +276,140 @@ if /i "%createReplay%"=="y" echo copy /y "%certDir%\%certName%" "%USERPROFILE%\.
 echo.
 echo %GRN%Done.%RST%
 goto :eof
+
+:: ─── Rollback ─────────────────────────────────────────────────────────────────
+:do_rollback
+echo.
+echo %CYN%Netskope SSL Rollback%RST%
+echo Removing Netskope SSL configuration from all tools...
+
+:: Environment variables
+echo.
+echo %CYN%--- Environment Variables ---%RST%
+for %%V in (SSL_CERT_FILE AWS_CA_BUNDLE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE GIT_SSL_CAPATH) do (
+    reg delete "HKCU\Environment" /v %%V /f >NUL 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        echo   %GRN%%%V: removed%RST%
+    ) else (
+        echo   %GRY%%%V: not set%RST%
+    )
+)
+
+:: Git
+echo.
+echo %CYN%--- Git ---%RST%
+where git >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+    git config --global --unset http.sslCAInfo >NUL 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        echo   %GRN%git http.sslCAInfo: unset%RST%
+    ) else (
+        echo   %YLW%git http.sslCAInfo: not configured%RST%
+    )
+) else (
+    echo   %GRY%Git is not installed%RST%
+)
+
+:: .curlrc
+echo.
+echo %CYN%--- cURL ---%RST%
+if exist "%HOMEPATH%\.curlrc" (
+    del /f /q "%HOMEPATH%\.curlrc" >NUL 2>&1
+    echo   %GRN%.curlrc deleted%RST%
+) else (
+    echo   %GRY%.curlrc not found%RST%
+)
+
+:: Google Cloud CLI
+echo.
+echo %CYN%--- Google Cloud CLI ---%RST%
+where gcloud >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+    gcloud config unset core/custom_ca_certs_file >NUL 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        echo   %GRN%gcloud: custom_ca_certs_file unset%RST%
+    ) else (
+        echo   %YLW%gcloud: not configured%RST%
+    )
+) else (
+    echo   %GRY%gcloud is not installed%RST%
+)
+
+:: NPM
+echo.
+echo %CYN%--- NPM ---%RST%
+where npm >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+    npm config delete cafile >NUL 2>&1
+    echo   %GRN%npm cafile: deleted%RST%
+) else (
+    echo   %GRY%npm is not installed%RST%
+)
+
+:: PHP Composer
+echo.
+echo %CYN%--- PHP Composer ---%RST%
+where composer >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+    composer config --global --unset cafile >NUL 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        echo   %GRN%composer cafile: unset%RST%
+    ) else (
+        echo   %YLW%composer: cafile not configured%RST%
+    )
+) else (
+    echo   %GRY%composer is not installed%RST%
+)
+
+:: Yarn
+echo.
+echo %CYN%--- Yarn ---%RST%
+where yarn >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+    yarn config delete httpsCaFilePath >NUL 2>&1
+    if %ERRORLEVEL% NEQ 0 yarn config delete cafile >NUL 2>&1
+    echo   %GRN%yarn: cafile config removed%RST%
+) else (
+    where yarnpkg >NUL 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        yarnpkg config delete httpsCaFilePath >NUL 2>&1
+        if %ERRORLEVEL% NEQ 0 yarnpkg config delete cafile >NUL 2>&1
+        echo   %GRN%yarnpkg: cafile config removed%RST%
+    ) else (
+        echo   %GRY%yarn is not installed%RST%
+    )
+)
+
+:: Java keytool
+echo.
+echo %CYN%--- Java ---%RST%
+powershell -NoProfile -Command "$storepass='changeit'; function Get-AllJDKs { $found=@{}; function Add-JDK($jdkPath,$label){ if(-not $jdkPath -or -not (Test-Path $jdkPath)){return}; $kt=Join-Path $jdkPath 'bin\keytool.exe'; if((Test-Path $kt)-and-not $found.Contains($jdkPath.ToLower())){ $found[$jdkPath.ToLower()]=@($jdkPath,$label) } }; if($env:JAVA_HOME){Add-JDK $env:JAVA_HOME 'JAVA_HOME'}; $ktCmd=Get-Command keytool -ErrorAction SilentlyContinue; if($ktCmd){Add-JDK (Split-Path (Split-Path $ktCmd.Source)) 'PATH'}; @('HKLM:\SOFTWARE\JavaSoft\JDK','HKLM:\SOFTWARE\WOW6432Node\JavaSoft\JDK')|ForEach-Object{ if(Test-Path $_){ Get-ChildItem $_ -ErrorAction SilentlyContinue|ForEach-Object{ $jh=(Get-ItemProperty $_.PSPath -Name JavaHome -ErrorAction SilentlyContinue).JavaHome; if($jh){Add-JDK $jh ('Registry ('+$_.PSChildName+')')} } } }; @('Java','Eclipse Adoptium','Amazon Corretto','Zulu','Microsoft')|ForEach-Object{ $p=Join-Path $env:ProgramFiles $_; if(Test-Path $p){ Get-ChildItem $p -Directory -ErrorAction SilentlyContinue|ForEach-Object{ Add-JDK $_.FullName ('Common ('+$_.Name+')') } } }; return $found.Values }; $allJDKs=@(Get-AllJDKs); if($allJDKs.Count -eq 0){ Write-Host '  No Java installations found' -ForegroundColor DarkGray } else { foreach($entry in $allJDKs){ $jdkHome=$entry[0]; $label=$entry[1]; Write-Host ('  ['+$label+'] '+$jdkHome) -ForegroundColor Cyan; $cacerts=Join-Path $jdkHome 'lib\security\cacerts'; if(-not(Test-Path $cacerts)){ $cacerts=Join-Path $jdkHome 'jre\lib\security\cacerts' }; if(-not(Test-Path $cacerts)){ Write-Host '    cacerts: not found' -ForegroundColor Yellow; continue }; $keytool=Join-Path $jdkHome 'bin\keytool.exe'; for($i=0;$i -lt 2;$i++){ $alias='netskope-'+$i; & $keytool -delete -alias $alias -keystore $cacerts -storepass $storepass *>$null; if($LASTEXITCODE -eq 0){ Write-Host ('    keytool alias '+$alias+': removed') -ForegroundColor Green } else { Write-Host ('    keytool alias '+$alias+': not found') -ForegroundColor DarkGray } } } }"
+
+:: VS Code
+echo.
+echo %CYN%--- VS Code ---%RST%
+powershell -NoProfile -Command "$found=$false; @(@{Dir=($env:APPDATA+'\Code\User');Edition='VS Code'},@{Dir=($env:APPDATA+'\Code - Insiders\User');Edition='VS Code Insiders'})|ForEach-Object{ $dir=$_.Dir; $edition=$_.Edition; if(-not(Test-Path $dir)){return}; $found=$true; $sf=Join-Path $dir 'settings.json'; if(-not(Test-Path $sf)){ Write-Host ('  '+$edition+': settings.json not found') -ForegroundColor DarkGray; return }; try{ $s=Get-Content $sf -Raw|ConvertFrom-Json; if($s.PSObject.Properties['http.systemCertificates']){ $s.PSObject.Properties.Remove('http.systemCertificates'); $s|ConvertTo-Json -Depth 10|Set-Content $sf -Encoding UTF8; Write-Host ('  '+$edition+': http.systemCertificates removed') -ForegroundColor Green } else { Write-Host ('  '+$edition+': http.systemCertificates not configured') -ForegroundColor Yellow } } catch { Write-Host ('  '+$edition+': failed - '+$_) -ForegroundColor Red } }; if(-not $found){ Write-Host '  VS Code is not installed' -ForegroundColor DarkGray }"
+
+:: Windows Certificate Store
+echo.
+echo %CYN%--- Windows Certificate Store ---%RST%
+powershell -NoProfile -Command "$removed=0; @(Get-ChildItem Cert:\LocalMachine\Root, Cert:\CurrentUser\Root -ErrorAction SilentlyContinue) | Where-Object { $_.Subject -match 'Netskope' -or $_.Issuer -match 'Netskope' } | ForEach-Object { $loc=if($_.PSParentPath -match 'LocalMachine'){'LocalMachine'}else{'CurrentUser'}; try { $s=New-Object System.Security.Cryptography.X509Certificates.X509Store([System.Security.Cryptography.X509Certificates.StoreName]::Root,[System.Security.Cryptography.X509Certificates.StoreLocation]::$loc); $s.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite); $s.Remove($_); $s.Close(); Write-Host ('  removed: '+$_.Subject) -ForegroundColor Green; $removed++ } catch { Write-Host ('  failed to remove: '+$_.Subject+' - '+$_) -ForegroundColor Red } }; if($removed -eq 0){ Write-Host '  no Netskope certificates found in store' -ForegroundColor DarkGray }"
+
+:: Docker Desktop
+echo.
+echo %CYN%--- Docker Desktop ---%RST%
+if exist "%USERPROFILE%\.docker\ca.pem" (
+    del /f /q "%USERPROFILE%\.docker\ca.pem" >NUL 2>&1
+    echo   %GRN%Docker ca.pem removed%RST%
+) else (
+    echo   %GRY%Docker ca.pem not found%RST%
+)
+
+echo.
+echo %GRN%Rollback complete.%RST%
+goto :eof
+
+:: ─── Helpers ──────────────────────────────────────────────────────────────────
 
 :: Function to check if a command exists
 :command_exists

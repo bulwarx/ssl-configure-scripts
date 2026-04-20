@@ -2,7 +2,7 @@
 ## This tool will try to detect common cli tools and will configure the Netskope SSL certificate bundle.
 
 # Check which shell environment is used (bash)
-get_shell(){
+get_shell() {
     my_shell=$(echo $SHELL)
     echo "Shell used is $my_shell"
     if [[ $my_shell == *"bash"* ]]; then
@@ -12,6 +12,136 @@ get_shell(){
     fi
 }
 get_shell
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Rollback function — removes all Netskope SSL configuration
+rollback() {
+    echo
+    echo "=== Netskope SSL Rollback ==="
+    echo "Removing Netskope SSL configuration from all tools..."
+
+    # Environment variables
+    echo
+    echo "--- Environment Variables ---"
+    if [ -f "$shell" ]; then
+        tmp=$(mktemp)
+        grep -v -E '^export (SSL_CERT_FILE|AWS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|GIT_SSL_CAPATH)=' "$shell" > "$tmp"
+        removed=$(( $(wc -l < "$shell") - $(wc -l < "$tmp") ))
+        mv "$tmp" "$shell"
+        echo "  $removed Netskope environment variable export(s) removed from $shell"
+    else
+        echo "  shell profile not found: $shell"
+    fi
+
+    # Git
+    echo
+    echo "--- Git ---"
+    if command_exists git; then
+        git config --global --unset http.sslCAInfo 2>/dev/null && \
+            echo "  git http.sslCAInfo: unset" || echo "  git http.sslCAInfo: not configured"
+    else
+        echo "  Git is not installed"
+    fi
+
+    # .curlrc
+    echo
+    echo "--- cURL ---"
+    if [ -f ~/.curlrc ]; then
+        rm ~/.curlrc && echo "  .curlrc deleted" || echo "  .curlrc: failed to delete"
+    else
+        echo "  .curlrc not found"
+    fi
+
+    # Google Cloud CLI
+    echo
+    echo "--- Google Cloud CLI ---"
+    if command_exists gcloud; then
+        gcloud config unset core/custom_ca_certs_file 2>/dev/null && \
+            echo "  gcloud: custom_ca_certs_file unset" || echo "  gcloud: not configured"
+    else
+        echo "  gcloud is not installed"
+    fi
+
+    # NPM
+    echo
+    echo "--- NPM ---"
+    if command_exists npm; then
+        npm config delete cafile 2>/dev/null && \
+            echo "  npm cafile: deleted" || echo "  npm: cafile not configured"
+    else
+        echo "  npm is not installed"
+    fi
+
+    # PHP Composer
+    echo
+    echo "--- PHP Composer ---"
+    if command_exists composer; then
+        composer config --global --unset cafile 2>/dev/null && \
+            echo "  composer cafile: unset" || echo "  composer: not configured"
+    else
+        echo "  composer is not installed"
+    fi
+
+    # Yarn
+    echo
+    echo "--- Yarn ---"
+    yarn_found=0
+    for yarn_cmd in yarn yarnpkg; do
+        if command_exists $yarn_cmd; then
+            yarn_found=1
+            $yarn_cmd config delete httpsCaFilePath 2>/dev/null || $yarn_cmd config delete cafile 2>/dev/null
+            echo "  $yarn_cmd: cafile config removed"
+            break
+        fi
+    done
+    if [ $yarn_found -eq 0 ]; then
+        echo "  yarn is not installed"
+    fi
+
+    # Java keytool
+    echo
+    echo "--- Java ---"
+    storepass="changeit"
+    jdk_found=0
+    for try_home in "$JAVA_HOME" "$(dirname "$(dirname "$(readlink -f "$(which java 2>/dev/null)" 2>/dev/null)" 2>/dev/null)" 2>/dev/null)"; do
+        [ -z "$try_home" ] && continue
+        keytool_bin="$try_home/bin/keytool"
+        cacerts="$try_home/lib/security/cacerts"
+        [ -f "$cacerts" ] || cacerts="$try_home/jre/lib/security/cacerts"
+        if [ -f "$keytool_bin" ] && [ -f "$cacerts" ]; then
+            jdk_found=1
+            echo "  JDK: $try_home"
+            for alias in netskope-0 netskope-1; do
+                "$keytool_bin" -delete -alias "$alias" -keystore "$cacerts" \
+                    -storepass "$storepass" 2>/dev/null && \
+                    echo "    keytool alias $alias: removed" || \
+                    echo "    keytool alias $alias: not found"
+            done
+        fi
+    done
+    if [ $jdk_found -eq 0 ]; then
+        echo "  No Java installations found"
+    fi
+
+    echo
+    echo "Rollback complete."
+    exit 0
+}
+
+# Check for rollback mode
+if [ "$1" = "--rollback" ]; then
+    rollback
+fi
+
+# Check for full-bundle mode (default: Netskope-only)
+full_bundle=0
+for arg in "$@"; do
+    [ "$arg" = "--full-bundle" ] && full_bundle=1
+done
 
 # Set Certificate bundle name and location
 read -p "Please provide certificate bundle name [netskope-cert-bundle.pem]: " certName
@@ -37,23 +167,20 @@ else
   echo "Tenant Reachable"
 fi
 
-# Function to check if a command exists
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 # Function to create or update certificate bundle
 create_cert_bundle() {
   echo "Creating cert bundle"
-  curl -k "https://addon-$tenantName/config/ca/cert?orgkey=$orgKey" > $certDir/$certName
-  curl -k "https://addon-$tenantName/config/org/cert?orgkey=$orgKey" >> $certDir/$certName
-  curl -k -L "https://curl.se/ca/cacert.pem" >> $certDir/$certName
+  curl -k "https://addon-$tenantName/config/org/cert?orgkey=$orgKey" > $certDir/$certName
+  curl -k "https://addon-$tenantName/config/ca/cert?orgkey=$orgKey" >> $certDir/$certName
+  if [ $full_bundle -eq 1 ]; then
+    curl -k -L "https://curl.se/ca/cacert.pem" >> $certDir/$certName
+  fi
 }
 
 if [ -f "$certDir/$certName" ]; then
   echo "$certName already exists in $certDir."
   read -p "Recreate Certificate Bundle? (y/N) " -n 1 -r
-  echo    
+  echo
   if [[ $REPLY =~ ^[Yy]$ ]]; then
     create_cert_bundle
   fi
