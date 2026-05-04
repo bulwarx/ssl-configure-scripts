@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bulwarx SSL Configurator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+
+<!-- ══ Sidebar ═══════════════════════════════════════════════════ -->
+<div class="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-icon">
+      <img src="assets/bulwarx-identity-small-picture.png" alt="Bulwarx" onerror="this.parentElement.innerHTML='<span style=&quot;font-size:20px;font-weight:800;color:#0e1828&quot;>B</span>'" />
+    </div>
+    <div>
+      <div class="sb-logo-brand">BULWARX</div>
+      <div class="sb-logo-sub">SSL Configurator</div>
+    </div>
+  </div>
+
+  <div class="step-list" id="step-list">
+    <div class="step-item" data-s="1">
+      <div class="step-badge">1</div>
+      <span class="step-label">Proxy Integration</span>
+    </div>
+    <div class="step-item" data-s="2">
+      <div class="step-badge">2</div>
+      <span class="step-label">Connection Details</span>
+    </div>
+    <div class="step-item" data-s="3">
+      <div class="step-badge">3</div>
+      <span class="step-label">Certificate Bundle</span>
+    </div>
+    <div class="step-item" data-s="4">
+      <div class="step-badge">4</div>
+      <span class="step-label">Select Tools</span>
+    </div>
+    <div class="step-item" data-s="5">
+      <div class="step-badge">5</div>
+      <span class="step-label">Review &amp; Run</span>
+    </div>
+  </div>
+
+  <div class="sb-footer" id="sb-footer">v2.0.0</div>
+</div>
+
+<!-- ══ Main ══════════════════════════════════════════════════════ -->
+<div class="main">
+
+  <div class="progress-track"><div class="progress-fill" id="prog"></div></div>
+
+  <div class="main-header">
+    <div class="mh-eyebrow" id="mh-step"></div>
+    <div class="mh-title"   id="mh-title"></div>
+    <div class="mh-desc"    id="mh-desc"></div>
+  </div>
+
+  <div class="main-content">
+
+    <!-- ── Step 1: Proxy Integration ───────────────────────────── -->
+    <div class="step-content" id="step-1">
+      <div class="info-banner">
+        <span class="icon">ℹ️</span>
+        Only one integration is currently available. Netskope has been selected automatically. Additional integrations are in development.
+      </div>
+      <div class="int-grid">
+
+        <div class="int-card selected">
+          <div class="int-badge-wrap"><span class="badge badge-purple"><span class="dot"></span>Selected</span></div>
+          <div class="int-icon-wrap"><img src="assets/Netskope-Logo.png" alt="Netskope" /></div>
+          <div class="int-name">Netskope</div>
+          <div class="int-desc">Secure Access Service Edge — SSL inspection via Netskope proxy</div>
+        </div>
+
+        <div class="int-card disabled">
+          <div class="int-badge-wrap"><span class="badge badge-gray">Soon</span></div>
+          <div class="int-icon-wrap"><img src="assets/Forcepoint_Name.png" alt="Forcepoint" /></div>
+          <div class="int-name">Forcepoint</div>
+          <div class="int-desc">Forcepoint ONE — data-first SASE with SSL inspection</div>
+        </div>
+
+        <div class="int-card disabled">
+          <div class="int-badge-wrap"><span class="badge badge-gray">Soon</span></div>
+          <div class="int-icon-wrap"><img src="assets/Symantec_Logo.jpeg" alt="Symantec" /></div>
+          <div class="int-name">Symantec</div>
+          <div class="int-desc">Symantec Web Security Service — cloud proxy with TLS decryption</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Step 2: Connection Details ──────────────────────────── -->
+    <div class="step-content" id="step-2">
+      <div class="card">
+        <div class="card-label">Netskope Tenant</div>
+        <div class="field">
+          <label>Tenant URL</label>
+          <input type="text" id="tenant-url" placeholder="mytenant.eu.goskope.com" />
+        </div>
+        <div class="field">
+          <label>Organisation Key</label>
+          <div class="igrp">
+            <input type="password" id="org-key" placeholder="Enter your org key" />
+            <button class="btn btn-primary btn-sm" onclick="testConn()">Verify connection</button>
+          </div>
+        </div>
+        <div class="alert alert-chk" id="conn-status" style="display:none">
+          <span id="conn-icon">⏳</span> <span id="conn-msg">Checking…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Step 3: Certificate Bundle ──────────────────────────── -->
+    <div class="step-content" id="step-3">
+      <div class="card">
+        <div class="card-label">Bundle Location</div>
+        <div class="field-row">
+          <div class="field">
+            <label>File name</label>
+            <input type="text" id="cert-name" value="netskope-cert-bundle.pem" />
+          </div>
+          <div class="field">
+            <label>Directory</label>
+            <div class="igrp">
+              <input type="text" id="cert-dir" placeholder="Loading default…" />
+              <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="browseDir()">Browse…</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Bundle type</div>
+        <div class="seg">
+          <button class="seg-btn on" id="tgl-ns"   onclick="setBundle('ns')">Netskope-only &nbsp;<small style="opacity:.7">(recommended)</small></button>
+          <button class="seg-btn"    id="tgl-full" onclick="setBundle('full')">Full &nbsp;<small style="opacity:.7">(+ public CA roots)</small></button>
+        </div>
+        <p style="font-size:12px; color:var(--t3); line-height:1.65; margin-top:2px">
+          <strong style="color:var(--t2)">Netskope-only</strong> — RootCA + SubCA only. Under SSL inspection all traffic is re-signed by Netskope, so tools only need to trust these two certificates.<br><br>
+          <strong style="color:var(--t3)">Full bundle</strong> — also appends <code>curl.se/ca/cacert.pem</code> public CA roots and writes a <code>netskope_only.pem</code> sidecar. Use when some tools bypass the proxy.
+        </p>
+      </div>
+
+      <div id="bundle-exists-card" class="card" style="display:none">
+        <div style="display:flex; align-items:center; gap:14px">
+          <span style="font-size:16px">⚠️</span>
+          <div style="flex:1; font-size:13px; color:var(--t2); line-height:1.5" id="bundle-exists-msg">
+            Bundle already exists
+          </div>
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--t2); margin:0; white-space:nowrap">
+            <input type="checkbox" id="redownload" style="accent-color:var(--acc); width:14px; height:14px" />
+            Re-download
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Step 4: Select Tools ─────────────────────────────────── -->
+    <div class="step-content" id="step-4">
+      <div class="tool-bar">
+        <button class="btn btn-ghost btn-sm" onclick="selectAll(true)">Select all</button>
+        <button class="btn btn-ghost btn-sm" onclick="selectAll(false)">Select none</button>
+        <div class="sp"></div>
+        <span class="tool-count" id="tool-count"></span>
+      </div>
+      <div id="tools-container">
+        <div style="color:var(--t3); padding:24px; text-align:center">Detecting installed tools…</div>
+      </div>
+    </div>
+
+    <!-- ── Step 5: Review & Run ─────────────────────────────────── -->
+    <div class="step-content" id="step-5">
+
+      <!-- Options -->
+      <div class="section-label section-label-choice">Choose action</div>
+      <div class="mode-row">
+        <div class="mode-card mode-on-cfg" id="mode-cfg" onclick="setMode('configure')">
+          <div class="mode-title">⚙️&ensp;Configure</div>
+          <div class="mode-desc">Apply SSL certificate trust to all selected tools</div>
+        </div>
+        <div class="mode-card" id="mode-rb" onclick="setMode('rollback')">
+          <div class="mode-title">↩&ensp;Rollback</div>
+          <div class="mode-desc">Remove all Netskope SSL configuration from every detected tool</div>
+        </div>
+      </div>
+
+      <label class="opt-toggle" for="replay-chk">
+        <input type="checkbox" id="replay-chk" checked />
+        <span class="opt-toggle-body">
+          <span class="opt-toggle-title">Generate replay script</span>
+          <span class="opt-toggle-sub"><span id="replay-name">configured_tools.bat</span> — records every applied command for re-use on other machines</span>
+        </span>
+      </label>
+
+      <!-- Information -->
+      <div class="section-label">Summary</div>
+      <div class="summary-list">
+        <div class="summary-row">
+          <span class="summary-key">Integration</span>
+          <span class="summary-val">🛡️ Netskope <span class="summary-muted" id="sum-tenant">—</span></span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-key">Certificate bundle</span>
+          <span class="summary-val"><span id="sum-bundle-name">—</span> <span class="summary-muted" id="sum-bundle-path">—</span></span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-key">Tools selected</span>
+          <span class="summary-val"><span id="sum-tools">—</span> <span class="summary-muted" id="sum-tools-sub">—</span></span>
+        </div>
+      </div>
+
+      <div class="log-wrap">
+        <div class="log-label">Output</div>
+        <div class="log-area" id="log-area"><span class="l-dim">Ready. Press Run to start…</span>
+</div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <button class="btn btn-ghost" id="download-replay-btn" style="display:none" onclick="downloadReplay()">⬇ Download replay script</button>
+        <button class="btn btn-success" id="run-btn" onclick="runScript()">▶&ensp;Run configuration</button>
+      </div>
+
+    </div>
+
+  </div><!-- /main-content -->
+
+  <div class="nav-bar">
+    <button class="btn btn-ghost" id="btn-back" onclick="nav(-1)">← Back</button>
+    <span style="font-size:12px; color:var(--t3)" id="nav-lbl"></span>
+    <button class="btn btn-primary" id="btn-next" onclick="nav(1)">Continue →</button>
+  </div>
+
+</div><!-- /main -->
+</div><!-- /app -->
+
+<script src="app.js"></script>
+</body>
+</html>
