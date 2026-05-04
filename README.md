@@ -139,6 +139,16 @@ When all parameters are set the script runs without any interactive prompts.
 
 All scripts offer an optional replay script (`configured_tools.bat` / `configured_tools.ps1` / `configured_tools.sh`) that records every configuration command applied. Run it on another machine with the same cert bundle path to replicate the configuration without re-running the full interactive script.
 
+## GUI App (Tauri)
+
+A cross-platform GUI is available in [`tauri-app/`](tauri-app/), built with Tauri 2 (Rust backend + HTML/CSS/JS frontend). It provides the same functionality as the scripts through a 5-step wizard — no terminal required.
+
+**Download:** pre-built installers are attached to each GitHub Release (`.exe` / `.dmg` / `.AppImage`).
+
+**Build from source:** see [`tauri-app/README.md`](tauri-app/README.md).
+
+The GUI and the scripts are independent — both live in this repo and serve different audiences. Users who want to modify or automate the configuration should use the scripts directly.
+
 ## Credit
 
 Original creator and upstream repository: https://github.com/duduke/ssl-configure-scripts

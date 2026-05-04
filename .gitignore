@@ -1,2 +1,6 @@
 # Recreate scripts output
 configured_tools*
+
+# Tauri / Rust build artifacts
+tauri-app/src-tauri/target/
+tauri-app/node_modules/

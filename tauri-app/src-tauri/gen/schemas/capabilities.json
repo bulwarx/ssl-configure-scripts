@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability granting access to dialog, fs, and shell plugins","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open","dialog:allow-save","fs:allow-read-text-file","fs:allow-write-text-file","fs:allow-mkdir","shell:allow-open"]}}
