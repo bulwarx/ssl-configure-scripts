@@ -241,8 +241,10 @@ def rollback():
 
     # --- Environment variables ---
     header('Environment Variables')
+    # Rollback also clears the legacy directory-var name that older versions
+    # wrongly set to a file path (GIT_SSL_CAPATH).
     env_vars = ['SSL_CERT_FILE', 'AWS_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS',
-                'REQUESTS_CA_BUNDLE', 'GIT_SSL_CAPATH']
+                'REQUESTS_CA_BUNDLE', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH']
     if is_windows:
         for var in env_vars:
             r = subprocess.run(
@@ -269,7 +271,7 @@ def rollback():
         else:
             warn(f'  shell profile not found: {shell}')
 
-    # Git is configured via GIT_SSL_CAPATH env var — already removed above.
+    # Git is configured via GIT_SSL_CAINFO env var — already removed above.
     # cURL is configured via SSL_CERT_FILE env var — already removed above.
 
     # --- Google Cloud CLI ---
@@ -495,8 +497,22 @@ if not os.path.isdir(cert_dir):
     warn(f'{cert_dir} does not exist — creating it')
     os.makedirs(cert_dir, exist_ok=True)
 
-tenant_name = input('Please provide full tenant name (ex: mytenant.eu.goskope.com): ')
-org_key = input('Please provide tenant orgkey: ')
+def normalize_tenant(raw):
+    """Strip https://, http://, and any path suffix so the cert URL splices cleanly."""
+    t = raw.strip()
+    for prefix in ('https://', 'http://'):
+        if t.lower().startswith(prefix):
+            t = t[len(prefix):]
+            break
+    # Drop anything after the host
+    for sep in '/?#':
+        i = t.find(sep)
+        if i != -1:
+            t = t[:i]
+    return t.rstrip('.')
+
+tenant_name = normalize_tenant(input('Please provide full tenant name (ex: mytenant.eu.goskope.com): '))
+org_key = input('Please provide tenant orgkey: ').strip()
 
 # Clear a stale REQUESTS_CA_BUNDLE from the process environment if the file no longer exists
 # (e.g. after rollback deleted the bundle in the same shell session).
@@ -850,12 +866,15 @@ _cert_path = os.path.join(cert_dir, cert_name)
 # should still show "configured", not "already configured").
 _env_before_run = {
     var: get_persistent_env_var(var)
-    for var in ['GIT_SSL_CAPATH', 'SSL_CERT_FILE', 'AWS_CA_BUNDLE',
+    for var in ['GIT_SSL_CAINFO', 'SSL_CERT_FILE', 'AWS_CA_BUNDLE',
                 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE']
 } if is_windows else {}
 
 tools = [
-    ("Git", "GIT_SSL_CAPATH", "git", ""),
+    # Git: GIT_SSL_CAINFO is the *file* path variant. The directory variant
+    # (GIT_SSL_CAPATH) is wrong for a single PEM bundle — strict consumers
+    # like `uv` warn when a file is in a directory-typed env var.
+    ("Git", "GIT_SSL_CAINFO", "git", ""),
     ("OpenSSL", "SSL_CERT_FILE", "openssl", ""),
     ("cURL", "SSL_CERT_FILE", "curl", ""),
     ("AWS CLI", "AWS_CA_BUNDLE", "aws", ""),

@@ -10,6 +10,25 @@ pub fn default_bundle_dir() -> String {
         .to_string()
 }
 
+/// Reduce whatever the user pasted to a bare host like `mytenant.eu.goskope.com`.
+/// Tolerates `https://`, `http://`, trailing slashes, and accidental path/query
+/// suffixes — anything else would produce a malformed URL when we splice it
+/// into `https://addon-{tenant}/...`.
+fn normalize_tenant(raw: &str) -> String {
+    let mut t = raw.trim();
+    for prefix in ["https://", "http://"] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            t = rest;
+            break;
+        }
+    }
+    // Drop anything after the host (path, query, fragment).
+    let host_end = t
+        .find(|c: char| c == '/' || c == '?' || c == '#')
+        .unwrap_or(t.len());
+    t[..host_end].trim_end_matches('.').to_string()
+}
+
 #[derive(Serialize)]
 pub struct ConnectionResult {
     pub ok: bool,
@@ -18,6 +37,7 @@ pub struct ConnectionResult {
 
 #[tauri::command]
 pub async fn test_connection(tenant: String, org_key: String) -> Result<ConnectionResult, String> {
+    let tenant = normalize_tenant(&tenant);
     let url = format!(
         "https://addon-{}/config/org/cert?orgkey={}",
         tenant, org_key
@@ -62,6 +82,7 @@ pub async fn download_bundle(
     cert_name: String,
     full_bundle: bool,
 ) -> Result<BundleResult, String> {
+    let tenant = normalize_tenant(&tenant);
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(60))

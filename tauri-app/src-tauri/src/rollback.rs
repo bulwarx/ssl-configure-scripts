@@ -121,13 +121,16 @@ fn rollback_git() -> ToolResult {
 }
 
 fn rollback_env_ssl() -> ToolResult {
-    for var in crate::tools::SSL_ENV_VARS {
+    for var in crate::tools::SSL_ENV_VARS_CLEAR {
         let _ = crate::platform::remove_env_var(var);
     }
     ok_result(
         "openssl",
         "OpenSSL",
-        format!("{} SSL env vars removed", crate::tools::SSL_ENV_VARS.len()),
+        format!(
+            "{} SSL env vars removed",
+            crate::tools::SSL_ENV_VARS_CLEAR.len()
+        ),
     )
 }
 

@@ -329,8 +329,9 @@ function Invoke-Rollback {
 
     # Environment variables
     Write-Header "Environment variables"
+    # Also clears legacy GIT_SSL_CAPATH that older runs wrongly set to a file path.
     foreach ($var in @('SSL_CERT_FILE', 'AWS_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS',
-                        'REQUESTS_CA_BUNDLE', 'GIT_SSL_CAPATH')) {
+                        'REQUESTS_CA_BUNDLE', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH')) {
         $cur = [Environment]::GetEnvironmentVariable($var, 'User')
         if ($cur) {
             Remove-PersistentEnvVar $var
@@ -541,6 +542,11 @@ if ([string]::IsNullOrWhiteSpace($tenantName)) {
     $tenantName = Read-Host 'Full tenant name (e.g. mytenant.eu.goskope.com)'
 } else { Write-Log "tenantName: $tenantName" }
 
+# Strip https://, http://, trailing path — anything else would produce a
+# malformed `https://addon-{tenantName}/...` URL when we splice it in.
+$tenantName = $tenantName.Trim() -replace '^https?://', ''
+$tenantName = ($tenantName -split '[/?#]')[0].TrimEnd('.')
+
 if ([string]::IsNullOrWhiteSpace($orgKey)) {
     $orgKey = Read-Host 'Tenant orgkey'
 } else { Write-Log 'orgKey: [configured]' }
@@ -693,10 +699,10 @@ Write-Host ""
 if (Test-Cmd 'cargo') {
     Write-Host "Cargo Package Manager is installed"; cargo --version
     Set-PersistentEnvVar 'SSL_CERT_FILE'  $certPath
-    Set-PersistentEnvVar 'GIT_SSL_CAPATH' $certPath
+    Set-PersistentEnvVar 'GIT_SSL_CAINFO' $certPath
     Write-Ok "Cargo Package Manager configured"
     Add-Replay "[Environment]::SetEnvironmentVariable('SSL_CERT_FILE',  `"$certPath`", 'User')"
-    Add-Replay "[Environment]::SetEnvironmentVariable('GIT_SSL_CAPATH', `"$certPath`", 'User')"
+    Add-Replay "[Environment]::SetEnvironmentVariable('GIT_SSL_CAINFO', `"$certPath`", 'User')"
 } else { Write-Dim "Cargo Package Manager is not installed" }
 
 Write-Host ""
