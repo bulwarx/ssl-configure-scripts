@@ -13,11 +13,13 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: '*.exe'
+            # Standalone executable, no installer — needs WebView2 on the host
+            # (already present on Win10 1903+ and Win11).
+            artifact-path: 'tauri-app/src-tauri/target/release/ssl-configurator.exe'
           - os: macos-latest
-            artifact: '*.dmg'
+            artifact-path: 'tauri-app/src-tauri/target/release/bundle/dmg/*.dmg'
           - os: ubuntu-22.04
-            artifact: '*.AppImage'
+            artifact-path: 'tauri-app/src-tauri/target/release/bundle/appimage/*.AppImage'
 
     runs-on: ${{ matrix.os }}
 
@@ -64,8 +66,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ssl-configurator-${{ runner.os }}
-          path: |
-            tauri-app/src-tauri/target/release/bundle/**/${{ matrix.artifact }}
+          path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
 
   release:
     needs: build

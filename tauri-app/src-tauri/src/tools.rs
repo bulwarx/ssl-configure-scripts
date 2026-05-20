@@ -244,14 +244,29 @@ pub fn configure_git(bundle_path: &str) -> ToolResult {
     }
 }
 
-/// Every env var that Configure sets — and Rollback must clear.
-/// Kept in one place so the two can't drift.
-pub(crate) const SSL_ENV_VARS: &[&str] = &[
+/// Env vars Configure sets — every one of these takes a *file* path
+/// (a PEM bundle). Anything that's semantically a *directory* path
+/// (SSL_CERT_DIR, GIT_SSL_CAPATH, …) must NOT go here: strict consumers
+/// like `uv` and OpenSSL warn / error when they see a file under a dir var.
+pub(crate) const SSL_ENV_VARS_SET: &[&str] = &[
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
+    "AWS_CA_BUNDLE",
+];
+
+/// Vars Rollback clears — superset of SET that also includes the
+/// legacy directory-var names earlier versions wrongly wrote a file path
+/// into. Keeps `Rollback` honest against old installs.
+pub(crate) const SSL_ENV_VARS_CLEAR: &[&str] = &[
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "REQUESTS_CA_BUNDLE",
     "CURL_CA_BUNDLE",
     "NODE_EXTRA_CA_CERTS",
+    "GIT_SSL_CAINFO",
     "GIT_SSL_CAPATH",
     "AWS_CA_BUNDLE",
 ];
@@ -260,7 +275,7 @@ pub fn configure_env_ssl(bundle_path: &str) -> ToolResult {
     let mut all_ok = true;
     let mut set_count = 0;
 
-    for var in SSL_ENV_VARS {
+    for var in SSL_ENV_VARS_SET {
         match crate::platform::set_env_var(var, bundle_path) {
             Ok(_) => set_count += 1,
             Err(_) => all_ok = false,
@@ -271,7 +286,7 @@ pub fn configure_env_ssl(bundle_path: &str) -> ToolResult {
         id: "openssl".into(),
         name: "OpenSSL / SSL env vars".into(),
         ok: all_ok,
-        message: format!("{}/{} SSL env vars set", set_count, SSL_ENV_VARS.len()),
+        message: format!("{}/{} SSL env vars set", set_count, SSL_ENV_VARS_SET.len()),
         command: None,
     }
 }

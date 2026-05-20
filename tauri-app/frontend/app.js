@@ -453,7 +453,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const platform = inTauriApp()
     ? (navigator.userAgent.includes('Windows') ? 'Windows' : navigator.platform)
     : navigator.platform;
-  document.getElementById('sb-footer').textContent = `v2.0.0 · ${platform}`;
+  document.getElementById('sb-footer').textContent = `v0.1.1 · ${platform}`;
 
   render();
 

@@ -34,6 +34,12 @@ if not exist "%certDir%" (
 set /p tenantName="Please provide full tenant name (ex: mytenant.eu.goskope.com):"
 set /p orgKey="Please provide tenant orgkey:"
 
+:: Strip an https:// or http:// prefix if the user pasted a full URL — otherwise
+:: the addon-%tenantName% splice below produces a malformed URL.
+if /i "%tenantName:~0,8%"=="https://" set tenantName=%tenantName:~8%
+if /i "%tenantName:~0,7%"=="http://"  set tenantName=%tenantName:~7%
+for /f "tokens=1 delims=/?#" %%H in ("%tenantName%") do set tenantName=%%H
+
 :: Check tenant reachability
 curl -k --write-out "%%{http_code}" --silent --output NUL https://%tenantName%/locallogin > temp.txt
 set /p status_code=<temp.txt
@@ -195,15 +201,15 @@ if %ERRORLEVEL% EQU 0 (
         setx SSL_CERT_FILE "%certDir%\%certName%"
         if /i "%createReplay%"=="y" echo setx SSL_CERT_FILE "%certDir%\%certName%" >> configured_tools.bat
     )
-    set GIT_SSL_CAPATH=
+    set GIT_SSL_CAINFO=
     for /f "tokens=*" %%P in ('cargo --version') do (
-        if "%%P"=="built on:" set GIT_SSL_CAPATH=%%P
+        if "%%P"=="built on:" set GIT_SSL_CAINFO=%%P
     )
-    if "%GIT_SSL_CAPATH%"=="%certDir%\%certName%" (
-        echo %YLW%Cargo GIT_SSL_CAPATH already configured%RST%
+    if "%GIT_SSL_CAINFO%"=="%certDir%\%certName%" (
+        echo %YLW%Cargo GIT_SSL_CAINFO already configured%RST%
     ) else (
-        setx GIT_SSL_CAPATH "%certDir%\%certName%"
-        if /i "%createReplay%"=="y" echo setx GIT_SSL_CAPATH "%certDir%\%certName%" >> configured_tools.bat
+        setx GIT_SSL_CAINFO "%certDir%\%certName%"
+        if /i "%createReplay%"=="y" echo setx GIT_SSL_CAINFO "%certDir%\%certName%" >> configured_tools.bat
     )
     echo %GRN%Cargo Package Manager configured%RST%
 ) else (
@@ -286,7 +292,7 @@ echo Removing Netskope SSL configuration from all tools...
 :: Environment variables
 echo.
 echo %CYN%--- Environment Variables ---%RST%
-for %%V in (SSL_CERT_FILE AWS_CA_BUNDLE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE GIT_SSL_CAPATH) do (
+for %%V in (SSL_CERT_FILE AWS_CA_BUNDLE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE GIT_SSL_CAINFO GIT_SSL_CAPATH) do (
     reg delete "HKCU\Environment" /v %%V /f >NUL 2>&1
     if %ERRORLEVEL% EQU 0 (
         echo   %GRN%%%V: removed%RST%

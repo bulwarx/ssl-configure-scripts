@@ -29,7 +29,7 @@ rollback() {
     echo "--- Environment Variables ---"
     if [ -f "$shell" ]; then
         tmp=$(mktemp)
-        grep -v -E '^export (SSL_CERT_FILE|AWS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|GIT_SSL_CAPATH)=' "$shell" > "$tmp"
+        grep -v -E '^export (SSL_CERT_FILE|AWS_CA_BUNDLE|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|GIT_SSL_CAINFO|GIT_SSL_CAPATH)=' "$shell" > "$tmp"
         removed=$(( $(wc -l < "$shell") - $(wc -l < "$tmp") ))
         mv "$tmp" "$shell"
         echo "  $removed Netskope environment variable export(s) removed from $shell"
@@ -158,6 +158,13 @@ fi
 read -p "Please provide full tenant name (ex: mytenant.eu.goskope.com): " tenantName
 read -p "Please provide tenant orgkey: " orgKey
 
+# Strip https://, http://, and any path suffix so the cert URL splices cleanly.
+tenantName="${tenantName#https://}"
+tenantName="${tenantName#http://}"
+tenantName="${tenantName%%/*}"
+tenantName="${tenantName%%\?*}"
+tenantName="${tenantName%%#*}"
+
 status_code=$(curl -k --write-out %{http_code} --silent --output /dev/null https://$tenantName/locallogin)
 
 if [[ "$status_code" -ne "307" ]] ; then
@@ -222,7 +229,7 @@ configure_tool() {
 > configured_tools.sh
 
 # Configure tools
-configure_tool "Git" "GIT_SSL_CAPATH" "git" ""
+configure_tool "Git" "GIT_SSL_CAINFO" "git" ""
 configure_tool "OpenSSL" "SSL_CERT_FILE" "openssl" ""
 configure_tool "cURL" "SSL_CERT_FILE" "curl" ""
 configure_tool "Python Requests Library" "REQUESTS_CA_BUNDLE" "" ""
