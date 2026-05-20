@@ -14,7 +14,9 @@ fn prepare_webview_data_dir() {
         .unwrap_or_else(std::env::temp_dir);
     let dir = base.join("Bulwarx").join("SSLConfigurator").join("EBWebView");
     let _ = std::fs::create_dir_all(&dir);
-    std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &dir);
+    // SAFETY: called from `run()` before Tauri spawns any threads, so no
+    // other thread can race on the env block.
+    unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &dir) };
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
