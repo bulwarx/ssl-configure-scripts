@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Least-privilege default. The release job overrides this with `contents: write`.
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
