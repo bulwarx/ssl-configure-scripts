@@ -15,6 +15,9 @@ permissions:
 
 jobs:
   build:
+    # Explicit name keeps the check context stable as `build (<os>)` regardless
+    # of other matrix fields — required by branch protection on main.
+    name: build (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
