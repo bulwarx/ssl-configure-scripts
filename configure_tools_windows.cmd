@@ -63,11 +63,52 @@ if exist "%certDir%\%certName%" (
 )
 if /i "%recreate%"=="y" (
     echo %CYN%Creating cert bundle...%RST%
+    :: Fetch each URL into a temp file and check both HTTP status (curl -f
+    :: fails fast on non-2xx) and that the response contains a PEM marker.
+    :: Only assemble the bundle if every part is good.
+    set "_tmp_root=%TEMP%\netskope_root_%RANDOM%.pem"
+    set "_tmp_sub=%TEMP%\netskope_sub_%RANDOM%.pem"
+    set "_tmp_pub=%TEMP%\netskope_pub_%RANDOM%.pem"
+
+    curl -k -f -sS -o "%_tmp_root%" "https://addon-%tenantName%/config/org/cert?orgkey=%orgKey%"
+    if errorlevel 1 (
+        echo %RED%Certificate download failed (RootCA^). Check tenant URL and orgkey.%RST%
+        del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
+        exit /b 1
+    )
+    findstr /c:"BEGIN CERTIFICATE" "%_tmp_root%" >NUL || (
+        echo %RED%RootCA response did not contain a certificate.%RST%
+        del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
+        exit /b 1
+    )
+
+    curl -k -f -sS -o "%_tmp_sub%" "https://addon-%tenantName%/config/ca/cert?orgkey=%orgKey%"
+    if errorlevel 1 (
+        echo %RED%Certificate download failed (SubCA^). Check tenant URL and orgkey.%RST%
+        del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
+        exit /b 1
+    )
+    findstr /c:"BEGIN CERTIFICATE" "%_tmp_sub%" >NUL || (
+        echo %RED%SubCA response did not contain a certificate.%RST%
+        del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
+        exit /b 1
+    )
+
+    if "%fullBundle%"=="1" (
+        curl -k -f -sS -L -o "%_tmp_pub%" "https://curl.se/ca/cacert.pem"
+        if errorlevel 1 (
+            echo %RED%Public CA bundle download failed.%RST%
+            del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
+            exit /b 1
+        )
+    )
+
     if exist "%certDir%\%certName%" del /f /q "%certDir%\%certName%" >NUL 2>&1
-    type NUL > "%certDir%\%certName%"
-    curl -k "https://addon-%tenantName%/config/org/cert?orgkey=%orgKey%" >> "%certDir%\%certName%"
-    curl -k "https://addon-%tenantName%/config/ca/cert?orgkey=%orgKey%" >> "%certDir%\%certName%"
-    if "%fullBundle%"=="1" curl -k -L "https://curl.se/ca/cacert.pem" >> "%certDir%\%certName%"
+    type "%_tmp_root%" >> "%certDir%\%certName%"
+    type "%_tmp_sub%"  >> "%certDir%\%certName%"
+    if "%fullBundle%"=="1" type "%_tmp_pub%" >> "%certDir%\%certName%"
+    del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
+
     echo %GRN%Cert bundle created: %certDir%\%certName%%RST%
     set certWasRecreated=1
 )

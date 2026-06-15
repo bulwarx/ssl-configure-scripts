@@ -175,12 +175,40 @@ else
 fi
 
 # Function to create or update certificate bundle
+# Fetch each URL into a temp file first and verify HTTP status (-f fails fast
+# on non-2xx) + presence of a PEM marker. Only assemble the bundle if every
+# part is good — otherwise we'd silently produce a bundle missing the real cert.
+fetch_pem() {
+  local url="$1" out="$2" label="$3"
+  if ! curl -k -f -sS -o "$out" "$url"; then
+    echo "Certificate download failed ($label). Check tenant URL and orgkey." >&2
+    return 1
+  fi
+  if ! grep -q "BEGIN CERTIFICATE" "$out"; then
+    echo "Response for $label did not contain a certificate." >&2
+    return 1
+  fi
+}
+
 create_cert_bundle() {
   echo "Creating cert bundle"
-  curl -k "https://addon-$tenantName/config/org/cert?orgkey=$orgKey" > $certDir/$certName
-  curl -k "https://addon-$tenantName/config/ca/cert?orgkey=$orgKey" >> $certDir/$certName
+  local tmp_root tmp_sub tmp_pub
+  tmp_root=$(mktemp); tmp_sub=$(mktemp); tmp_pub=$(mktemp)
+  trap 'rm -f "$tmp_root" "$tmp_sub" "$tmp_pub"' RETURN
+
+  fetch_pem "https://addon-$tenantName/config/org/cert?orgkey=$orgKey" "$tmp_root" "RootCA" || exit 1
+  fetch_pem "https://addon-$tenantName/config/ca/cert?orgkey=$orgKey"  "$tmp_sub"  "SubCA"  || exit 1
   if [ $full_bundle -eq 1 ]; then
-    curl -k -L "https://curl.se/ca/cacert.pem" >> $certDir/$certName
+    if ! curl -k -f -sS -L -o "$tmp_pub" "https://curl.se/ca/cacert.pem"; then
+      echo "Public CA bundle download failed." >&2
+      exit 1
+    fi
+  fi
+
+  cat "$tmp_root" > "$certDir/$certName"
+  cat "$tmp_sub" >> "$certDir/$certName"
+  if [ $full_bundle -eq 1 ]; then
+    cat "$tmp_pub" >> "$certDir/$certName"
   fi
 }
 

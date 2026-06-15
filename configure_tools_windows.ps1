@@ -285,15 +285,36 @@ function New-CertBundle {
     )
     if ($fullBundle) { $urls.Add('https://curl.se/ca/cacert.pem') }
 
-    if (Test-Path $certPath) { Remove-Item -Path $certPath -Force -ErrorAction SilentlyContinue }
-    [IO.File]::WriteAllBytes($certPath, [byte[]]@())
-    $stream      = [IO.File]::Open($certPath, [IO.FileMode]::Append)
+    # Fetch everything into memory first. If any URL returns non-2xx or any
+    # response lacks the PEM marker, abort before writing the bundle file.
     $cachedBytes = @()
+    foreach ($url in $urls) {
+        try {
+            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing @skipTls
+        } catch {
+            Write-Err "Certificate download failed: $($_.Exception.Message) for $url"
+            Write-Err 'Check tenant URL and orgkey, then re-run.'
+            exit 1
+        }
+        if ($resp.StatusCode -lt 200 -or $resp.StatusCode -ge 300) {
+            Write-Err "Certificate download failed: HTTP $($resp.StatusCode) from $url"
+            Write-Err 'Check tenant URL and orgkey, then re-run.'
+            exit 1
+        }
+        $bytes = $resp.Content
+        $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+        if ($text -notmatch '-----BEGIN CERTIFICATE-----') {
+            Write-Err "Response from $url does not contain a certificate."
+            exit 1
+        }
+        $cachedBytes += , $bytes
+    }
+
+    if (Test-Path $certPath) { Remove-Item -Path $certPath -Force -ErrorAction SilentlyContinue }
+    $stream = [IO.File]::Open($certPath, [IO.FileMode]::Create)
     try {
-        foreach ($url in $urls) {
-            $bytes = (Invoke-WebRequest -Uri $url -UseBasicParsing @skipTls).Content
+        foreach ($bytes in $cachedBytes) {
             $stream.Write($bytes, 0, $bytes.Length)
-            $cachedBytes += , $bytes
         }
     } finally {
         $stream.Close()

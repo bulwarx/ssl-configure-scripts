@@ -533,22 +533,33 @@ def create_cert_bundle():
     info('Creating cert bundle...')
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     bundle_path = os.path.join(cert_dir, cert_name)
-    urls = [
+    netskope_urls = [
         f'https://addon-{tenant_name}/config/org/cert?orgkey={org_key}',  # RootCA first
         f'https://addon-{tenant_name}/config/ca/cert?orgkey={org_key}',   # SubCA second
     ]
-    if full_bundle:
-        urls.append('https://curl.se/ca/cacert.pem')
+    extra_urls = ['https://curl.se/ca/cacert.pem'] if full_bundle else []
+
+    # Fetch each URL into memory first. If any non-2xx or any response lacks a
+    # PEM marker, abort BEFORE touching the on-disk bundle — otherwise we end
+    # up with a half-written file that quietly omits Netskope's cert.
+    cached = []
+    for url in netskope_urls + extra_urls:
+        resp = requests.get(url, verify=False)
+        if not resp.ok:
+            err(f'Certificate download failed: HTTP {resp.status_code} from {url}')
+            err('Check tenant URL and orgkey, then re-run.')
+            sys.exit(1)
+        body = resp.content
+        if b'-----BEGIN CERTIFICATE-----' not in body:
+            err(f'Response from {url} does not contain a certificate.')
+            sys.exit(1)
+        cached.append(body)
+
     if os.path.exists(bundle_path):
         os.remove(bundle_path)
-    with open(bundle_path, 'wb'):
-        pass
-    cached = []
-    with open(bundle_path, 'ab') as f:
-        for url in urls:
-            data = requests.get(url, verify=False).content
-            f.write(data)
-            cached.append(data)
+    with open(bundle_path, 'wb') as f:
+        for body in cached:
+            f.write(body)
     ok(f'Cert bundle saved: {bundle_path}')
     if full_bundle:
         netskope_only_path = os.path.join(cert_dir, 'netskope_only.pem')
