@@ -188,6 +188,8 @@ A cross-platform GUI is available in [`tauri-app/`](tauri-app/), built with Taur
 
 **Download:** pre-built installers are attached to each GitHub Release (`.exe` / `.dmg` / `.AppImage`).
 
+Or
+
 **Build from source:** see [`tauri-app/README.md`](tauri-app/README.md).
 
 The GUI and the scripts are independent — both live in this repo and serve different audiences. Users who want to modify or automate the configuration should use the scripts directly.
