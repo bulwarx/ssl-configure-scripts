@@ -468,7 +468,7 @@ async function downloadReplay() {
 
 // ── Browser mock (for layout preview without Tauri) ───────────
 
-function mockInvoke(cmd) {
+function mockInvoke(cmd, args) {
   const mockTools = [
     { id:'git',      name:'Git',             group:'Developer Tools', installed:true,  version:'git version 2.45.2', path:'/usr/bin/git' },
     { id:'openssl',  name:'OpenSSL',          group:'Developer Tools', installed:true,  version:'OpenSSL 3.3.0', path:'/usr/bin/openssl' },

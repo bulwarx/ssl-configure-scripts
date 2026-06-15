@@ -23,6 +23,8 @@ def _enable_ansi():
             k.GetConsoleMode(h, ctypes.byref(m))
             k.SetConsoleMode(h, m.value | 4)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
         except Exception:
+            # Best-effort only — fall back to uncolored output if the console
+            # doesn't support VT sequences.
             pass
 
 _enable_ansi()
@@ -91,6 +93,7 @@ def find_all_pythons():
                         if os.path.isfile(path):
                             found[os.path.normcase(path)] = (path, label)
         except FileNotFoundError:
+            # The `py` launcher isn't installed — skip this discovery method.
             pass
         result = subprocess.run(['where', 'python'], capture_output=True, text=True)
         for line in result.stdout.splitlines():
@@ -110,6 +113,7 @@ def find_all_pythons():
                         if os.path.isfile(path):
                             found.setdefault(os.path.normcase(path), (path, label))
             except FileNotFoundError:
+                # This bundled-Python source (e.g. Azure CLI) isn't installed.
                 pass
     else:
         for cmd in ['python3', 'python']:
@@ -158,8 +162,10 @@ def find_all_jdks():
                                 break
                             i += 1
                 except OSError:
+                    # Registry key (this JDK vendor path) doesn't exist — skip it.
                     pass
         except ImportError:
+            # winreg is Windows-only; nothing to read from the registry elsewhere.
             pass
         prog_files = os.environ.get('ProgramFiles', r'C:\Program Files')
         for vendor in ['Java', 'Eclipse Adoptium', 'Amazon Corretto', 'Zulu', 'Microsoft']:
