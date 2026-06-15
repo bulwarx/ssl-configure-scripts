@@ -4,3 +4,12 @@ configured_tools*
 # Tauri / Rust build artifacts
 tauri-app/src-tauri/target/
 tauri-app/node_modules/
+
+# Python virtual environments
+venv/
+env/
+# VS Code settings
+.vscode/
+
+# Python Cache
+__pycache__/
