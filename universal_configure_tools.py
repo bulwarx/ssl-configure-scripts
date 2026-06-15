@@ -636,7 +636,8 @@ def set_env_var(env_var, value):
     else:
         with open(shell, 'a') as f:
             f.write(f'export {env_var}="{value}"\n')
-        subprocess.run('source', shell=True)
+        # Note: the export takes effect in new shells. We can't `source` the
+        # profile from here — a subprocess can't mutate the parent shell's env.
 
 
 def configure_python_ssl(python_exe, label, cert_path, cert_was_recreated=False):
@@ -888,7 +889,7 @@ def configure_tool(tool_name, env_var, check_command, post_command=None):
         info(f'{_BLD}{tool_name}{_RST} is installed')
         subprocess.run(f'{check_command} --version', shell=True)
         if env_var:
-            current_env = _env_before_run.get(env_var) if is_windows else os.getenv(env_var)
+            current_env = _env_before_run.get(env_var)
             if current_env == os.path.join(cert_dir, cert_name):
                 warn(f'{tool_name} already configured')
             else:
@@ -911,11 +912,13 @@ _cert_path = os.path.join(cert_dir, cert_name)
 # that existed before this run — not for shared vars set earlier in the same run
 # (e.g. OpenSSL and cURL both use SSL_CERT_FILE; once OpenSSL sets it, cURL
 # should still show "configured", not "already configured").
+# get_persistent_env_var reads the registry on Windows and os.getenv elsewhere,
+# so the same snapshot logic applies on every platform.
 _env_before_run = {
     var: get_persistent_env_var(var)
     for var in ['GIT_SSL_CAINFO', 'SSL_CERT_FILE', 'AWS_CA_BUNDLE',
                 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE']
-} if is_windows else {}
+}
 
 tools = [
     # Git: GIT_SSL_CAINFO is the *file* path variant. The directory variant
