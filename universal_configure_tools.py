@@ -476,6 +476,19 @@ if '--rollback' in sys.argv:
 
 full_bundle = '--full-bundle' in sys.argv
 
+def get_cli_value(flag):
+    """Return the value for `--flag VALUE` or `--flag=VALUE`, else None."""
+    for i, a in enumerate(sys.argv):
+        if a == flag and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if a.startswith(flag + '='):
+            return a.split('=', 1)[1]
+    return None
+
+# Use an existing PEM bundle instead of downloading (e.g. distributed
+# centrally, or when the download endpoint is unreachable).
+existing_bundle = get_cli_value('--cert-bundle')
+
 # ─── Install mode ─────────────────────────────────────────────────────────────
 
 print(f'\n{_CYN}{_BLD}╔══════════════════════════════════════════╗{_RST}')
@@ -488,14 +501,6 @@ import urllib3
 def get_input(prompt, default):
     user_input = input(f'{prompt} [{default}]: ')
     return user_input if user_input else default
-
-cert_name = get_input('Please provide certificate bundle name', 'netskope-cert-bundle.pem')
-cert_dir = get_input('Please provide certificate bundle location', '~/netskope')
-cert_dir = os.path.normpath(os.path.expanduser(cert_dir))
-
-if not os.path.isdir(cert_dir):
-    warn(f'{cert_dir} does not exist — creating it')
-    os.makedirs(cert_dir, exist_ok=True)
 
 def normalize_tenant(raw):
     """Strip https://, http://, and any path suffix so the cert URL splices cleanly."""
@@ -510,24 +515,6 @@ def normalize_tenant(raw):
         if i != -1:
             t = t[:i]
     return t.rstrip('.')
-
-tenant_name = normalize_tenant(input('Please provide full tenant name (ex: mytenant.eu.goskope.com): '))
-org_key = input('Please provide tenant orgkey: ').strip()
-
-# Clear a stale REQUESTS_CA_BUNDLE from the process environment if the file no longer exists
-# (e.g. after rollback deleted the bundle in the same shell session).
-# The tenant check uses verify=False — at this point we don't have a cert bundle yet.
-_stale_ca = os.environ.get('REQUESTS_CA_BUNDLE', '')
-if _stale_ca and not os.path.isfile(_stale_ca):
-    del os.environ['REQUESTS_CA_BUNDLE']
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-status_code = requests.get(f'https://{tenant_name}/locallogin', verify=False).status_code
-
-if status_code != 200:
-    err('Tenant Unreachable')
-    sys.exit(1)
-else:
-    ok('Tenant Reachable')
 
 def create_cert_bundle():
     info('Creating cert bundle...')
@@ -568,16 +555,59 @@ def create_cert_bundle():
             f.write(cached[1])
         ok(f'Netskope-only cert saved: {netskope_only_path}')
 
-cert_was_recreated = False
-if os.path.isfile(os.path.join(cert_dir, cert_name)):
-    warn(f'{cert_name} already exists in {cert_dir}.')
-    recreate = input('Recreate Certificate Bundle? (y/N) ').strip().lower()
-    if recreate == 'y':
+if existing_bundle:
+    # ─── Existing bundle: validate and use in place, no download ───────────
+    existing_bundle = os.path.normpath(os.path.expanduser(existing_bundle))
+    if not os.path.isfile(existing_bundle):
+        err(f'Certificate bundle not found: {existing_bundle}')
+        sys.exit(1)
+    with open(existing_bundle, 'rb') as f:
+        if b'-----BEGIN CERTIFICATE-----' not in f.read():
+            err(f'{existing_bundle} does not contain a PEM certificate.')
+            sys.exit(1)
+    cert_dir = os.path.dirname(existing_bundle)
+    cert_name = os.path.basename(existing_bundle)
+    # Treat as freshly provided so Python/Java stores are (re)configured.
+    cert_was_recreated = True
+    ok(f'Using existing certificate bundle: {existing_bundle}')
+else:
+    # ─── Download from Netskope ────────────────────────────────────────────
+    cert_name = get_input('Please provide certificate bundle name', 'netskope-cert-bundle.pem')
+    cert_dir = get_input('Please provide certificate bundle location', '~/netskope')
+    cert_dir = os.path.normpath(os.path.expanduser(cert_dir))
+
+    if not os.path.isdir(cert_dir):
+        warn(f'{cert_dir} does not exist — creating it')
+        os.makedirs(cert_dir, exist_ok=True)
+
+    tenant_name = normalize_tenant(input('Please provide full tenant name (ex: mytenant.eu.goskope.com): '))
+    org_key = input('Please provide tenant orgkey: ').strip()
+
+    # Clear a stale REQUESTS_CA_BUNDLE from the process environment if the file no longer exists
+    # (e.g. after rollback deleted the bundle in the same shell session).
+    # The tenant check uses verify=False — at this point we don't have a cert bundle yet.
+    _stale_ca = os.environ.get('REQUESTS_CA_BUNDLE', '')
+    if _stale_ca and not os.path.isfile(_stale_ca):
+        del os.environ['REQUESTS_CA_BUNDLE']
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    status_code = requests.get(f'https://{tenant_name}/locallogin', verify=False).status_code
+
+    if status_code != 200:
+        err('Tenant Unreachable')
+        sys.exit(1)
+    else:
+        ok('Tenant Reachable')
+
+    cert_was_recreated = False
+    if os.path.isfile(os.path.join(cert_dir, cert_name)):
+        warn(f'{cert_name} already exists in {cert_dir}.')
+        recreate = input('Recreate Certificate Bundle? (y/N) ').strip().lower()
+        if recreate == 'y':
+            create_cert_bundle()
+            cert_was_recreated = True
+    else:
         create_cert_bundle()
         cert_was_recreated = True
-else:
-    create_cert_bundle()
-    cert_was_recreated = True
 
 # --- Replay script ---
 _replay_ext = 'bat' if is_windows else 'sh'

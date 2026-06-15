@@ -96,7 +96,12 @@
 
     <!-- ── Step 2: Connection Details ──────────────────────────── -->
     <div class="step-content" id="step-2">
-      <div class="card">
+      <div class="seg" style="margin-bottom:14px">
+        <button class="seg-btn on" id="src-download" onclick="setSource('download')">Download from Netskope</button>
+        <button class="seg-btn"    id="src-existing" onclick="setSource('existing')">Use existing bundle</button>
+      </div>
+
+      <div class="card" id="src-download-card">
         <div class="card-label">Netskope Tenant</div>
         <div class="field">
           <label>Tenant URL</label>
@@ -113,10 +118,41 @@
           <span id="conn-icon">⏳</span> <span id="conn-msg">Checking…</span>
         </div>
       </div>
+
+      <div class="card" id="src-existing-card" style="display:none">
+        <div class="card-label">Existing certificate bundle</div>
+        <div class="field">
+          <label>PEM file</label>
+          <div class="igrp">
+            <input type="text" id="existing-bundle-path" placeholder="Select a .pem file…" />
+            <button class="btn btn-ghost btn-sm" style="white-space:nowrap" onclick="browseBundle()">Browse…</button>
+          </div>
+        </div>
+        <p style="font-size:12px; color:var(--t3); line-height:1.6; margin-top:2px">
+          Use a bundle you already have — e.g. distributed centrally, or when the download endpoint is unreachable. The file is validated for a certificate before continuing; no download is performed.
+        </p>
+        <div class="alert alert-chk" id="existing-status" style="display:none">
+          <span id="existing-icon">⏳</span> <span id="existing-msg">Checking…</span>
+        </div>
+      </div>
     </div>
 
     <!-- ── Step 3: Certificate Bundle ──────────────────────────── -->
     <div class="step-content" id="step-3">
+      <!-- Existing-bundle mode: nothing to download/configure here -->
+      <div class="card" id="step3-existing" style="display:none">
+        <div class="card-label">Certificate bundle</div>
+        <div style="display:flex; align-items:flex-start; gap:12px">
+          <span style="font-size:16px">📄</span>
+          <div style="flex:1; font-size:13px; color:var(--t2); line-height:1.6">
+            Using your existing bundle — no download needed.
+            <div style="font-size:12px; color:var(--t3); margin-top:6px; word-break:break-all" id="step3-existing-path">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Download mode -->
+      <div id="step3-download">
       <div class="card">
         <div class="card-label">Bundle Location</div>
         <div class="field-row">
@@ -158,6 +194,7 @@
           </label>
         </div>
       </div>
+      </div><!-- /step3-download -->
     </div>
 
     <!-- ── Step 4: Select Tools ─────────────────────────────────── -->

@@ -137,42 +137,18 @@ if [ "$1" = "--rollback" ]; then
     rollback
 fi
 
-# Check for full-bundle mode (default: Netskope-only)
+# Check for full-bundle mode (default: Netskope-only) and existing-bundle path
 full_bundle=0
+cert_bundle=""
+prev=""
 for arg in "$@"; do
     [ "$arg" = "--full-bundle" ] && full_bundle=1
+    case "$arg" in
+        --cert-bundle=*) cert_bundle="${arg#*=}" ;;
+    esac
+    [ "$prev" = "--cert-bundle" ] && cert_bundle="$arg"
+    prev="$arg"
 done
-
-# Set Certificate bundle name and location
-read -p "Please provide certificate bundle name [netskope-cert-bundle.pem]: " certName
-certName=${certName:-netskope-cert-bundle.pem}
-read -p "Please provide certificate bundle location [~/netskope]: " certDir
-certDir=${certDir:-~/netskope}
-if [ ! -d "$certDir" ]; then
-  echo "$certDir does not exist."
-  echo "creating $certDir"
-  mkdir -p $certDir
-fi
-
-# Get tenant information to create certificate bundle
-read -p "Please provide full tenant name (ex: mytenant.eu.goskope.com): " tenantName
-read -p "Please provide tenant orgkey: " orgKey
-
-# Strip https://, http://, and any path suffix so the cert URL splices cleanly.
-tenantName="${tenantName#https://}"
-tenantName="${tenantName#http://}"
-tenantName="${tenantName%%/*}"
-tenantName="${tenantName%%\?*}"
-tenantName="${tenantName%%#*}"
-
-status_code=$(curl -k --write-out %{http_code} --silent --output /dev/null https://$tenantName/locallogin)
-
-if [[ "$status_code" -ne "307" ]] ; then
-  echo "Tenant Unreachable"
-  exit 1
-else
-  echo "Tenant Reachable"
-fi
 
 # Function to create or update certificate bundle
 # Fetch each URL into a temp file first and verify HTTP status (-f fails fast
@@ -212,15 +188,70 @@ create_cert_bundle() {
   fi
 }
 
-if [ -f "$certDir/$certName" ]; then
-  echo "$certName already exists in $certDir."
-  read -p "Recreate Certificate Bundle? (y/N) " -n 1 -r
+# Prompt for an existing bundle if not supplied via --cert-bundle.
+if [ -z "$cert_bundle" ]; then
+  read -p "Use an existing certificate bundle instead of downloading? (y/N) " -n 1 -r
   echo
   if [[ $REPLY =~ ^[Yy]$ ]]; then
+    read -p "Path to existing .pem bundle: " cert_bundle
+  fi
+fi
+
+if [ -n "$cert_bundle" ]; then
+  # Existing bundle: validate and use in place, no download
+  cert_bundle="${cert_bundle/#\~/$HOME}"
+  if [ ! -f "$cert_bundle" ]; then
+    echo "Certificate bundle not found: $cert_bundle" >&2
+    exit 1
+  fi
+  if ! grep -q "BEGIN CERTIFICATE" "$cert_bundle"; then
+    echo "$cert_bundle does not contain a PEM certificate." >&2
+    exit 1
+  fi
+  certDir=$(cd "$(dirname "$cert_bundle")" && pwd)
+  certName=$(basename "$cert_bundle")
+  echo "Using existing certificate bundle: $certDir/$certName"
+else
+  # Download from Netskope
+  read -p "Please provide certificate bundle name [netskope-cert-bundle.pem]: " certName
+  certName=${certName:-netskope-cert-bundle.pem}
+  read -p "Please provide certificate bundle location [~/netskope]: " certDir
+  certDir=${certDir:-~/netskope}
+  if [ ! -d "$certDir" ]; then
+    echo "$certDir does not exist."
+    echo "creating $certDir"
+    mkdir -p $certDir
+  fi
+
+  read -p "Please provide full tenant name (ex: mytenant.eu.goskope.com): " tenantName
+  read -p "Please provide tenant orgkey: " orgKey
+
+  # Strip https://, http://, and any path suffix so the cert URL splices cleanly.
+  tenantName="${tenantName#https://}"
+  tenantName="${tenantName#http://}"
+  tenantName="${tenantName%%/*}"
+  tenantName="${tenantName%%\?*}"
+  tenantName="${tenantName%%#*}"
+
+  status_code=$(curl -k --write-out %{http_code} --silent --output /dev/null https://$tenantName/locallogin)
+
+  if [[ "$status_code" -ne "307" ]] ; then
+    echo "Tenant Unreachable"
+    exit 1
+  else
+    echo "Tenant Reachable"
+  fi
+
+  if [ -f "$certDir/$certName" ]; then
+    echo "$certName already exists in $certDir."
+    read -p "Recreate Certificate Bundle? (y/N) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      create_cert_bundle
+    fi
+  else
     create_cert_bundle
   fi
-else
-  create_cert_bundle
 fi
 
 # Function to configure a tool with the certificate bundle
