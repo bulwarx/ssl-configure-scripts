@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 # Least-privilege default. The release job overrides this with `contents: write`.
@@ -67,6 +70,8 @@ jobs:
         run: tauri build
 
       - name: Upload artifacts
+        # On pull requests this job is only a build check — no need to store binaries.
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: ssl-configurator-${{ runner.os }}
