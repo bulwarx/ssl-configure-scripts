@@ -17,6 +17,12 @@ if /i "%~1"=="rollback" goto :do_rollback
 set fullBundle=0
 for %%a in (%*) do if /i "%%a"=="full-bundle" set fullBundle=1
 
+:: Optionally use an existing bundle instead of downloading
+set "certBundle="
+set /p useExisting="Use an existing certificate bundle instead of downloading? [y/N]: "
+if /i "%useExisting%"=="y" set /p certBundle="Path to existing .pem bundle: "
+if defined certBundle goto :use_existing
+
 :: Set Certificate bundle name and location
 set /p certName="Please provide certificate bundle name [netskope-cert-bundle.pem]:"
 if "%certName%"=="" set certName=netskope-cert-bundle.pem
@@ -112,6 +118,27 @@ if /i "%recreate%"=="y" (
     echo %GRN%Cert bundle created: %certDir%\%certName%%RST%
     set certWasRecreated=1
 )
+goto :after_bundle
+
+:use_existing
+:: Validate the provided bundle, then derive certDir / certName from its path.
+if not exist "%certBundle%" (
+    echo %RED%Certificate bundle not found: %certBundle%%RST%
+    exit /b 1
+)
+findstr /c:"BEGIN CERTIFICATE" "%certBundle%" >NUL || (
+    echo %RED%%certBundle% does not contain a PEM certificate.%RST%
+    exit /b 1
+)
+for %%F in ("%certBundle%") do (
+    set "certDir=%%~dpF"
+    set "certName=%%~nxF"
+)
+if "%certDir:~-1%"=="\" set "certDir=%certDir:~0,-1%"
+set certWasRecreated=1
+echo %GRN%Using existing certificate bundle: %certBundle%%RST%
+
+:after_bundle
 
 :: Ask whether to create a replay script
 set createReplay=n

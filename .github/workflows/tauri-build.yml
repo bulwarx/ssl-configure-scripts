@@ -15,6 +15,9 @@ permissions:
 
 jobs:
   build:
+    # Explicit name keeps the check context stable as `build (<os>)` regardless
+    # of other matrix fields — required by branch protection on main.
+    name: build (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -22,10 +25,15 @@ jobs:
           - os: windows-latest
             # Standalone executable, no installer — needs WebView2 on the host
             # (already present on Win10 1903+ and Win11).
+            build-args: ''
             artifact-path: 'tauri-app/src-tauri/target/release/ssl-configurator.exe'
           - os: macos-latest
-            artifact-path: 'tauri-app/src-tauri/target/release/bundle/dmg/*.dmg'
+            # Build only the .app (no .dmg). Dragging a .dmg to /Applications
+            # needs admin; the zipped .app runs from anywhere without elevation.
+            build-args: '--bundles app'
+            artifact-path: 'tauri-app/src-tauri/ssl-configurator-macos.zip'
           - os: ubuntu-22.04
+            build-args: ''
             artifact-path: 'tauri-app/src-tauri/target/release/bundle/appimage/*.AppImage'
 
     runs-on: ${{ matrix.os }}
@@ -67,7 +75,14 @@ jobs:
 
       - name: Build Tauri app
         working-directory: tauri-app
-        run: tauri build
+        run: tauri build ${{ matrix.build-args }}
+
+      - name: Package macOS .app (zip, self-contained)
+        if: runner.os == 'macOS'
+        working-directory: tauri-app/src-tauri/target/release/bundle/macos
+        run: |
+          app=$(ls -d *.app | head -1)
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$GITHUB_WORKSPACE/tauri-app/src-tauri/ssl-configurator-macos.zip"
 
       - name: Upload artifacts
         # On pull requests this job is only a build check — no need to store binaries.

@@ -158,3 +158,23 @@ pub async fn download_bundle(
         sidecar_path,
     })
 }
+
+/// Validate a user-supplied certificate bundle so it can be used in place of
+/// downloading one. Confirms the file exists and contains at least one PEM
+/// certificate block — otherwise tools would be configured to trust garbage.
+#[tauri::command]
+pub fn use_existing_bundle(path: String) -> Result<BundleResult, String> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(format!("File not found: {}", path));
+    }
+    let bytes = fs::read(&p).map_err(|e| format!("Cannot read file: {}", e))?;
+    let text = String::from_utf8_lossy(&bytes);
+    if !text.contains("-----BEGIN CERTIFICATE-----") {
+        return Err("File does not contain a PEM certificate (-----BEGIN CERTIFICATE-----).".into());
+    }
+    Ok(BundleResult {
+        path: p.to_string_lossy().to_string(),
+        sidecar_path: None,
+    })
+}

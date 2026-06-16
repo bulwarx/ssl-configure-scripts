@@ -17,6 +17,7 @@ $tenantName   = ""
 $orgKey       = ""
 $certName     = "netskope-cert-bundle.pem"
 $certDir      = ""      # leave empty to default to $env:USERPROFILE\netskope
+$certBundle   = ""      # set to an existing .pem path to skip the download entirely
 $recreateCert = $false
 $rollback     = $false  # set $true to undo all Netskope SSL configuration
 $fullBundle   = $false  # set $true to append the public curl.se CA bundle (default: Netskope-only)
@@ -548,61 +549,80 @@ Write-Host ''
 
 # ─── User inputs ──────────────────────────────────────────────────────────────
 
-if ([string]::IsNullOrWhiteSpace($certName)) {
-    $certName = Read-Default 'Certificate bundle name' 'netskope-cert-bundle.pem'
-} else { Write-Log "certName: $certName" }
-
-if ([string]::IsNullOrWhiteSpace($certDir)) {
-    $certDir = Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope')
-} else { Write-Log "certDir: $certDir" }
-
-$certDir  = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))
-$certPath = Join-Path $certDir $certName
-
-if ([string]::IsNullOrWhiteSpace($tenantName)) {
-    $tenantName = Read-Host 'Full tenant name (e.g. mytenant.eu.goskope.com)'
-} else { Write-Log "tenantName: $tenantName" }
-
-# Strip https://, http://, trailing path — anything else would produce a
-# malformed `https://addon-{tenantName}/...` URL when we splice it in.
-$tenantName = $tenantName.Trim() -replace '^https?://', ''
-$tenantName = ($tenantName -split '[/?#]')[0].TrimEnd('.')
-
-if ([string]::IsNullOrWhiteSpace($orgKey)) {
-    $orgKey = Read-Host 'Tenant orgkey'
-} else { Write-Log 'orgKey: [configured]' }
-
-# ─── Create directory ─────────────────────────────────────────────────────────
-
-if (-not (Test-Path $certDir)) {
-    Write-Warn "$certDir does not exist — creating it"
-    New-Item -ItemType Directory -Path $certDir -Force | Out-Null
+# Prompt for an existing bundle if not pre-set and running interactively.
+if ([string]::IsNullOrWhiteSpace($certBundle)) {
+    $useExisting = (Read-Host 'Use an existing certificate bundle instead of downloading? [y/N]') -ieq 'y'
+    if ($useExisting) { $certBundle = Read-Host 'Path to existing .pem bundle' }
 }
 
-# ─── Tenant reachability ──────────────────────────────────────────────────────
-
-try {
-    Invoke-WebRequest -Uri "https://$tenantName/locallogin" -UseBasicParsing @skipTls `
-                      -ErrorAction Stop | Out-Null
-    Write-Ok 'Tenant Reachable'
-} catch {
-    Write-Err "Tenant Unreachable: $_"
-    exit 1
-}
-
-# ─── Cert bundle ──────────────────────────────────────────────────────────────
-
-$certWasRecreated = $false
-if (Test-Path $certPath) {
-    Write-Warn "$certName already exists in $certDir."
-    if ($recreateCert) {
-        New-CertBundle; $certWasRecreated = $true
-    } else {
-        $rec = Read-Host 'Recreate Certificate Bundle? (y/N)'
-        if ($rec -ieq 'y') { New-CertBundle; $certWasRecreated = $true }
+if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
+    # ─── Existing bundle: validate and use in place, no download ──────────────
+    $certPath = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certBundle))
+    if (-not (Test-Path $certPath -PathType Leaf)) {
+        Write-Err "Certificate bundle not found: $certPath"
+        exit 1
     }
+    if ((Get-Content $certPath -Raw) -notmatch '-----BEGIN CERTIFICATE-----') {
+        Write-Err "$certPath does not contain a PEM certificate."
+        exit 1
+    }
+    $certDir  = Split-Path -Parent $certPath
+    $certName = Split-Path -Leaf   $certPath
+    $certWasRecreated = $true   # treat as freshly provided so stores are (re)configured
+    Write-Ok "Using existing certificate bundle: $certPath"
 } else {
-    New-CertBundle; $certWasRecreated = $true
+    # ─── Download from Netskope ───────────────────────────────────────────────
+    if ([string]::IsNullOrWhiteSpace($certName)) {
+        $certName = Read-Default 'Certificate bundle name' 'netskope-cert-bundle.pem'
+    } else { Write-Log "certName: $certName" }
+
+    if ([string]::IsNullOrWhiteSpace($certDir)) {
+        $certDir = Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope')
+    } else { Write-Log "certDir: $certDir" }
+
+    $certDir  = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))
+    $certPath = Join-Path $certDir $certName
+
+    if ([string]::IsNullOrWhiteSpace($tenantName)) {
+        $tenantName = Read-Host 'Full tenant name (e.g. mytenant.eu.goskope.com)'
+    } else { Write-Log "tenantName: $tenantName" }
+
+    # Strip https://, http://, trailing path — anything else would produce a
+    # malformed `https://addon-{tenantName}/...` URL when we splice it in.
+    $tenantName = $tenantName.Trim() -replace '^https?://', ''
+    $tenantName = ($tenantName -split '[/?#]')[0].TrimEnd('.')
+
+    if ([string]::IsNullOrWhiteSpace($orgKey)) {
+        $orgKey = Read-Host 'Tenant orgkey'
+    } else { Write-Log 'orgKey: [configured]' }
+
+    if (-not (Test-Path $certDir)) {
+        Write-Warn "$certDir does not exist — creating it"
+        New-Item -ItemType Directory -Path $certDir -Force | Out-Null
+    }
+
+    # Tenant reachability
+    try {
+        Invoke-WebRequest -Uri "https://$tenantName/locallogin" -UseBasicParsing @skipTls `
+                          -ErrorAction Stop | Out-Null
+        Write-Ok 'Tenant Reachable'
+    } catch {
+        Write-Err "Tenant Unreachable: $_"
+        exit 1
+    }
+
+    $certWasRecreated = $false
+    if (Test-Path $certPath) {
+        Write-Warn "$certName already exists in $certDir."
+        if ($recreateCert) {
+            New-CertBundle; $certWasRecreated = $true
+        } else {
+            $rec = Read-Host 'Recreate Certificate Bundle? (y/N)'
+            if ($rec -ieq 'y') { New-CertBundle; $certWasRecreated = $true }
+        }
+    } else {
+        New-CertBundle; $certWasRecreated = $true
+    }
 }
 
 $createReplay = (Read-Host 'Create replay script (configured_tools.ps1)? [y/N]') -ieq 'y'

@@ -30,6 +30,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             cert::test_connection,
             cert::download_bundle,
+            cert::use_existing_bundle,
             cert::default_bundle_dir,
             tools::detect_tools,
             tools::configure_tools,

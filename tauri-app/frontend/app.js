@@ -30,6 +30,17 @@ async function openDirDialog() {
   return null;
 }
 
+async function openFileDialog() {
+  if (inTauriApp()) {
+    return window.__TAURI__.dialog.open({
+      directory: false,
+      multiple: false,
+      filters: [{ name: 'Certificate bundle', extensions: ['pem', 'crt', 'cer', 'cert'] }],
+    });
+  }
+  return null;
+}
+
 async function saveFileDialog(defaultName, content) {
   if (inTauriApp()) {
     const path = await window.__TAURI__.dialog.save({ defaultPath: defaultName });
@@ -52,6 +63,7 @@ async function saveFileDialog(defaultName, content) {
 
 let step = 1;
 let bundleType = 'ns';
+let certSource = 'download';   // 'download' | 'existing'
 let mode = 'configure';
 let detectedTools = [];
 let lastResults = [];
@@ -101,15 +113,22 @@ function render() {
 async function nav(d) {
   // Validate before leaving Step 2
   if (step === 2 && d === 1) {
-    const status = document.getElementById('conn-status');
-    if (!status.classList.contains('alert-ok')) {
-      alert('Please verify the connection before continuing.');
-      return;
+    if (certSource === 'download') {
+      const status = document.getElementById('conn-status');
+      if (!status.classList.contains('alert-ok')) {
+        alert('Please verify the connection before continuing.');
+        return;
+      }
+    } else {
+      // Existing bundle: must be present and validated
+      const ok = await validateExisting();
+      if (!ok) return;
     }
   }
 
-  // Download bundle when leaving Step 3 going forward
-  if (step === 3 && d === 1) {
+  // Leaving Step 3 going forward: download only in download mode.
+  // In existing mode the bundle path is already set from Step 2.
+  if (step === 3 && d === 1 && certSource === 'download') {
     const downloaded = await ensureBundle();
     if (!downloaded) return;
   }
@@ -155,6 +174,55 @@ function showConnStatus(type, icon, msg) {
   el.className = `alert alert-${type}`;
   document.getElementById('conn-icon').textContent = icon;
   document.getElementById('conn-msg').textContent = msg;
+}
+
+// ── Certificate source (download vs existing bundle) ──────────
+
+function setSource(s) {
+  certSource = s;
+  document.getElementById('src-download').classList.toggle('on', s === 'download');
+  document.getElementById('src-existing').classList.toggle('on', s === 'existing');
+  document.getElementById('src-download-card').style.display = s === 'download' ? '' : 'none';
+  document.getElementById('src-existing-card').style.display = s === 'existing' ? '' : 'none';
+  // Keep Step 3 in sync (download location/type vs existing-bundle note)
+  document.getElementById('step3-download').style.display = s === 'download' ? '' : 'none';
+  document.getElementById('step3-existing').style.display = s === 'existing' ? '' : 'none';
+}
+
+async function browseBundle() {
+  const selected = await openFileDialog();
+  if (!selected) return;
+  document.getElementById('existing-bundle-path').value = selected;
+  await validateExisting();
+}
+
+function showExistingStatus(type, icon, msg) {
+  const el = document.getElementById('existing-status');
+  el.style.display = 'flex';
+  el.className = `alert alert-${type}`;
+  document.getElementById('existing-icon').textContent = icon;
+  document.getElementById('existing-msg').textContent = msg;
+}
+
+// Validates the chosen file and, on success, sets lastBundlePath. Returns bool.
+async function validateExisting() {
+  const path = document.getElementById('existing-bundle-path').value.trim();
+  if (!path) {
+    showExistingStatus('err', '⚠️', 'Select a certificate bundle file');
+    return false;
+  }
+  showExistingStatus('chk', '⏳', 'Validating bundle…');
+  try {
+    const result = await invoke('use_existing_bundle', { path });
+    lastBundlePath = result.path;
+    document.getElementById('step3-existing-path').textContent = result.path;
+    showExistingStatus('ok', '✓', 'Valid certificate bundle');
+    return true;
+  } catch (e) {
+    lastBundlePath = '';
+    showExistingStatus('err', '✗', String(e));
+    return false;
+  }
 }
 
 // ── Step 3: Bundle location & download ───────────────────────
@@ -287,17 +355,24 @@ function setMode(m) {
 }
 
 function updateSummary() {
-  const tenant = document.getElementById('tenant-url').value.trim() || '—';
-  const certName = document.getElementById('cert-name').value.trim() || '—';
-  const certDir  = document.getElementById('cert-dir').value.trim()  || '—';
   const selected = getSelectedToolIds();
-  const total    = document.querySelectorAll('#step-4 .tool-row').length;
   const notInstalled = document.querySelectorAll('#step-4 .tool-row.disabled').length;
 
-  document.getElementById('sum-tenant').textContent = tenant;
-  document.getElementById('sum-bundle-name').textContent = certName;
-  document.getElementById('sum-bundle-path').textContent =
-    `${certDir} · ${bundleType === 'ns' ? 'Netskope-only' : 'Full bundle'}`;
+  if (certSource === 'existing') {
+    const fileName = lastBundlePath.split(/[\\/]/).pop() || '—';
+    document.getElementById('sum-tenant').textContent = 'Existing bundle';
+    document.getElementById('sum-bundle-name').textContent = fileName;
+    document.getElementById('sum-bundle-path').textContent = lastBundlePath || '—';
+  } else {
+    const tenant = document.getElementById('tenant-url').value.trim() || '—';
+    const certName = document.getElementById('cert-name').value.trim() || '—';
+    const certDir  = document.getElementById('cert-dir').value.trim()  || '—';
+    document.getElementById('sum-tenant').textContent = tenant;
+    document.getElementById('sum-bundle-name').textContent = certName;
+    document.getElementById('sum-bundle-path').textContent =
+      `${certDir} · ${bundleType === 'ns' ? 'Netskope-only' : 'Full bundle'}`;
+  }
+
   document.getElementById('sum-tools').textContent = `${selected.length} tools`;
   document.getElementById('sum-tools-sub').textContent =
     `${notInstalled} not installed — skipped`;
@@ -393,7 +468,7 @@ async function downloadReplay() {
 
 // ── Browser mock (for layout preview without Tauri) ───────────
 
-function mockInvoke(cmd) {
+function mockInvoke(cmd, args) {
   const mockTools = [
     { id:'git',      name:'Git',             group:'Developer Tools', installed:true,  version:'git version 2.45.2', path:'/usr/bin/git' },
     { id:'openssl',  name:'OpenSSL',          group:'Developer Tools', installed:true,  version:'OpenSSL 3.3.0', path:'/usr/bin/openssl' },
@@ -419,6 +494,7 @@ function mockInvoke(cmd) {
   if (cmd === 'default_bundle_dir') return Promise.resolve('C:\\Users\\user\\netskope');
   if (cmd === 'test_connection') return Promise.resolve({ ok: true, message: 'Tenant reachable (mock)' });
   if (cmd === 'download_bundle') return Promise.resolve({ path: 'C:\\netskope\\netskope-cert-bundle.pem', sidecar_path: null });
+  if (cmd === 'use_existing_bundle') return Promise.resolve({ path: args.path, sidecar_path: null });
   if (cmd === 'configure_tools' || cmd === 'rollback_tools') {
     // Simulate streamed output
     const log = document.getElementById('log-area');
@@ -453,7 +529,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const platform = inTauriApp()
     ? (navigator.userAgent.includes('Windows') ? 'Windows' : navigator.platform)
     : navigator.platform;
-  document.getElementById('sb-footer').textContent = `v0.1.1 · ${platform}`;
+  document.getElementById('sb-footer').textContent = `v0.2.0 · ${platform}`;
 
   render();
 

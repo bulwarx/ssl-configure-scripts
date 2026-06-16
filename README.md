@@ -11,6 +11,11 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 3. Detect installed tools and apply SSL certificate configuration automatically.
 4. Optionally generate a replay script with the applied configuration commands for re-use on other machines.
 
+## Why Use These Scripts?
+
+- **Comprehensive coverage** — supports a wide range of tools across Linux, macOS, and Windows, including Git, cURL, AWS CLI, gcloud, npm, Python environments, Java/JDK truststores, VS Code, Docker Desktop, and more.
+- **Cross-platform** — separate scripts for each platform, plus a universal Python script for consistent experience across all supported systems.
+
 ## Scripts Included
 
 | Script | Platform | Notes |
@@ -55,6 +60,23 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 pip install -r requirements.txt  # install dependencies for the Python script
 ``` 
 
+## ⚠️ Antivirus / Windows SmartScreen Warning
+
+These scripts and the GUI app may be flagged, blocked, or quarantined by antivirus software, endpoint protection, or Windows SmartScreen. This is expected given what the tool does:
+
+- **Fetches a certificate from a third party** (the Netskope tenant) and installs it into user and system trust stores.
+- **Modifies user and system environment variables** to point tools at the certificate bundle.
+- **Scans the system for installed applications** (Python, Java/JDK, VS Code, Docker, CLIs, etc.) to configure each one.
+- The software is **not code-signed** (currently, and possibly going forward), so SmartScreen will show an "unknown publisher" warning.
+
+These behaviors are legitimate and core to the tool's purpose, but they resemble patterns that security software treats as suspicious. If the script or app is blocked:
+
+- On Windows SmartScreen, click **More info → Run anyway**.
+- Allow / unblock the file in your antivirus or endpoint protection, or add an exclusion for it.
+- For the PowerShell script you may need to allow execution: `powershell -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1`.
+
+Only run these tools from a source you trust, and review the contents before executing.
+
 ## Quick Start
 
 Run one script for your platform, it is recommended to use the *Universal_configure_tools.py* for the broadest coverage and consistent experience across platforms. The script will prompt for your Netskope tenant name, org key, and desired certificate bundle location (with sensible defaults). It will then download the certs, create the bundle, and apply configuration to all detected tools.
@@ -95,6 +117,27 @@ configure_tools_windows.cmd full-bundle
 # Python
 python universal_configure_tools.py --full-bundle
 ```
+
+### Use an existing bundle (skip download)
+
+If you already have a certificate bundle — distributed centrally, or when the download endpoint is unreachable — point the script at it instead of downloading. The file is validated for a certificate before use. The GUI offers the same choice on the connection step.
+
+```sh
+# Linux / macOS
+./configure_tools_linux.sh --cert-bundle /path/to/bundle.pem
+./configure_tools_mac.sh --cert-bundle /path/to/bundle.pem
+
+# Python
+python universal_configure_tools.py --cert-bundle /path/to/bundle.pem
+
+# Windows PowerShell — set in the pre-set params block at the top of the file
+# $certBundle = "C:\path\to\bundle.pem"
+
+# Windows CMD — answer "y" when prompted to use an existing bundle
+configure_tools_windows.cmd
+```
+
+The interactive scripts (CMD and the `.sh` scripts) also prompt _"Use an existing certificate bundle instead of downloading?"_ when no flag is given.
 
 ## Rollback
 
@@ -144,6 +187,8 @@ All scripts offer an optional replay script (`configured_tools.bat` / `configure
 A cross-platform GUI is available in [`tauri-app/`](tauri-app/), built with Tauri 2 (Rust backend + HTML/CSS/JS frontend). It provides the same functionality as the scripts through a 5-step wizard — no terminal required.
 
 **Download:** pre-built installers are attached to each GitHub Release (`.exe` / `.dmg` / `.AppImage`).
+
+Or
 
 **Build from source:** see [`tauri-app/README.md`](tauri-app/README.md).
 
