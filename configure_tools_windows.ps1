@@ -20,7 +20,9 @@ $certDir      = ""      # leave empty to default to $env:USERPROFILE\netskope
 $certBundle   = ""      # set to an existing .pem path to skip the download entirely
 $recreateCert = $false
 $rollback     = $false  # set $true to undo all Netskope SSL configuration
-$fullBundle   = $false  # set $true to append the public curl.se CA bundle (default: Netskope-only)
+$netskopeOnly = $false  # set $true to use only the two Netskope certs, skipping the public curl.se CA bundle
+
+$fullBundle = -not $netskopeOnly
 
 # ─── TLS bypass for initial download (cert not trusted yet) ──────────────────
 
@@ -212,7 +214,8 @@ function Set-ToolSslCert($toolName, $envVar, $checkCmd, $postCmd = $null) {
     Write-Host ""
     if (Test-Cmd $checkCmd) {
         Write-Host "$toolName is installed"
-        & $checkCmd --version
+        # Not all OpenSSL builds understand --version (older builds only accept "version").
+        if ($checkCmd -eq 'openssl') { & openssl version } else { & $checkCmd --version }
         if ($envVar) {
             $current = [Environment]::GetEnvironmentVariable($envVar, [EnvironmentVariableTarget]::User)
             if ($current -eq $certPath) {

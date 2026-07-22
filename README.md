@@ -7,7 +7,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 ## What These Scripts Do
 
 1. Prompt for tenant details and bundle location (or use pre-set parameters for silent deployment).
-2. Download and create a certificate bundle — by default **Netskope-only** (RootCA + SubCA). Pass `--full-bundle` to also append the public `curl.se/ca/cacert.pem` CA roots.
+2. Download and create a certificate bundle — by default the **full bundle** (Netskope RootCA + SubCA, plus the public `curl.se/ca/cacert.pem` CA roots). This covers both traffic intercepted by the proxy and any endpoints it doesn't decrypt (e.g. some proxies exclude auth/login flows from inspection) — using a Netskope-only bundle in that case causes certificate errors on the excluded endpoints. Pass `--netskope-only` to use just the two Netskope certs instead.
 3. Detect installed tools and apply SSL certificate configuration automatically.
 4. Optionally generate a replay script with the applied configuration commands for re-use on other machines.
 
@@ -60,20 +60,25 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 pip install -r requirements.txt  # install dependencies for the Python script
 ``` 
 
-## ⚠️ Antivirus / Windows SmartScreen Warning
+## ⚠️ Antivirus / Windows SmartScreen / macOS Gatekeeper Warning
 
-These scripts and the GUI app may be flagged, blocked, or quarantined by antivirus software, endpoint protection, or Windows SmartScreen. This is expected given what the tool does:
+These scripts and the GUI app may be flagged, blocked, or quarantined by antivirus software, endpoint protection, Windows SmartScreen, or macOS Gatekeeper. This is expected given what the tool does:
 
 - **Fetches a certificate from a third party** (the Netskope tenant) and installs it into user and system trust stores.
 - **Modifies user and system environment variables** to point tools at the certificate bundle.
 - **Scans the system for installed applications** (Python, Java/JDK, VS Code, Docker, CLIs, etc.) to configure each one.
-- The software is **not code-signed** (currently, and possibly going forward), so SmartScreen will show an "unknown publisher" warning.
+- The software is **not code-signed or notarized** (currently, and possibly going forward), so SmartScreen will show an "unknown publisher" warning and macOS Gatekeeper will refuse to open it.
 
 These behaviors are legitimate and core to the tool's purpose, but they resemble patterns that security software treats as suspicious. If the script or app is blocked:
 
 - On Windows SmartScreen, click **More info → Run anyway**.
 - Allow / unblock the file in your antivirus or endpoint protection, or add an exclusion for it.
 - For the PowerShell script you may need to allow execution: `powershell -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1`.
+- On macOS, opening the GUI app's `.dmg`/`.app` for the first time may show **"'SSL Configurator' is damaged and can't be opened. You should move it to the Trash."** This isn't real corruption — it's Gatekeeper's response to an app that isn't notarized, combined with the quarantine flag macOS attaches to anything downloaded from a browser. Remove the quarantine flag and it opens normally:
+
+  ```sh
+  xattr -cr "/path/to/SSL Configurator.app"
+  ```
 
 Only run these tools from a source you trust, and review the contents before executing.
 
@@ -99,24 +104,26 @@ configure_tools_windows.cmd
 python universal_configure_tools.py
 ```
 
-### Full bundle (optional)
+### Netskope-only bundle (opt out of the public CA roots)
 
-By default the bundle contains only the two Netskope certs (RootCA + SubCA). Pass `--full-bundle` to also append the public `curl.se/ca/cacert.pem` CA roots. In full-bundle mode a `netskope_only.pem` sidecar is also written alongside the main bundle (PS1 and Python only).
+By default the bundle contains the two Netskope certs (RootCA + SubCA) plus the public `curl.se/ca/cacert.pem` CA roots, so tools keep working whether or not a given connection is decrypted by the proxy. Pass `--netskope-only` to use just the two Netskope certs instead — only do this if you're certain every connection your tools make is intercepted by the proxy, otherwise non-intercepted endpoints (some proxies exclude auth/login flows, for example) will fail with certificate errors. A `netskope_only.pem` sidecar with just the two Netskope certs is also written alongside the main bundle in full-bundle (default) mode, so you have both on hand either way.
 
 ```sh
 # Linux / macOS
-./configure_tools_linux.sh --full-bundle
-./configure_tools_mac.sh --full-bundle
+./configure_tools_linux.sh --netskope-only
+./configure_tools_mac.sh --netskope-only
 
 # Windows CMD
-configure_tools_windows.cmd full-bundle
+configure_tools_windows.cmd netskope-only
 
 # Windows PowerShell — set in the pre-set params block at the top of the file
-# $fullBundle = $true
+# $netskopeOnly = $true
 
 # Python
-python universal_configure_tools.py --full-bundle
+python universal_configure_tools.py --netskope-only
 ```
+
+`--full-bundle` is still accepted everywhere as a no-op, since it's now the default.
 
 ### Use an existing bundle (skip download)
 
@@ -162,7 +169,28 @@ python universal_configure_tools.py --rollback
 
 Rollback reverses: environment variables, Git, cURL `.curlrc`, gcloud, npm, Composer, Yarn, Python `certifi` marker + pip cert, Java keytool aliases (`netskope-0`, `netskope-1`), VS Code `http.systemCertificates`, Windows Certificate Store (matched by thumbprint, with subject/issuer fallback), and Docker `ca.pem`.
 
-## Silent / Automated Deployment (PowerShell)
+## Silent / Automated Deployment
+
+### Linux / macOS / Python
+
+Pass the tenant details as flags and the script runs with zero prompts — this is the supported path for software distributors pushing the script unattended:
+
+```sh
+# Linux / macOS
+./configure_tools_linux.sh --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+./configure_tools_mac.sh   --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+
+# Optional: --cert-name, --cert-dir, --recreate (force re-download if the bundle already exists)
+./configure_tools_mac.sh --tenant-name mytenant.eu.goskope.com --org-key your-org-key \
+  --cert-name netskope-cert-bundle.pem --cert-dir ~/netskope --recreate
+
+# Python
+python universal_configure_tools.py --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+```
+
+Passing `--cert-bundle` (an existing bundle) is silent by the same rule and, unlike the download path, never touches the network at all — the file is validated locally and used in place.
+
+### Windows PowerShell
 
 The PowerShell script supports pre-set parameters at the top of the file for fully unattended deployment. Edit the parameter block before running:
 
@@ -173,7 +201,7 @@ $certName     = "netskope-cert-bundle.pem"
 $certDir      = "C:\Users\username\netskope\"
 $recreateCert = $false   # set $true to force re-download on every run
 $rollback     = $false   # set $true to undo all Netskope SSL configuration
-$fullBundle   = $false   # set $true to append the public curl.se CA bundle
+$netskopeOnly = $false   # set $true to skip the public curl.se CA bundle (Netskope certs only)
 ```
 
 When all parameters are set the script runs without any interactive prompts.
@@ -205,4 +233,4 @@ Enhanced by the Bulwarx Ltd team:
 - ANSI color output and structured logging
 - Replay script support
 - Rollback support across all scripts
-- Netskope-only bundle by default (RootCA + SubCA, correct chain order); optional full public CA bundle via `--full-bundle`
+- Full bundle by default (Netskope RootCA + SubCA, correct chain order, plus public CA roots); optional Netskope-only bundle via `--netskope-only`
