@@ -173,12 +173,12 @@
       <div class="card">
         <div class="card-label">Bundle type</div>
         <div class="seg">
-          <button class="seg-btn on" id="tgl-ns"   onclick="setBundle('ns')">Netskope-only &nbsp;<small style="opacity:.7">(recommended)</small></button>
-          <button class="seg-btn"    id="tgl-full" onclick="setBundle('full')">Full &nbsp;<small style="opacity:.7">(+ public CA roots)</small></button>
+          <button class="seg-btn"    id="tgl-ns"   onclick="setBundle('ns')">Netskope-only</button>
+          <button class="seg-btn on" id="tgl-full" onclick="setBundle('full')">Full &nbsp;<small style="opacity:.7">(recommended)</small></button>
         </div>
         <p style="font-size:12px; color:var(--t3); line-height:1.65; margin-top:2px">
-          <strong style="color:var(--t2)">Netskope-only</strong> — RootCA + SubCA only. Under SSL inspection all traffic is re-signed by Netskope, so tools only need to trust these two certificates.<br><br>
-          <strong style="color:var(--t3)">Full bundle</strong> — also appends <code>curl.se/ca/cacert.pem</code> public CA roots and writes a <code>netskope_only.pem</code> sidecar. Use when some tools bypass the proxy.
+          <strong style="color:var(--t2)">Full bundle</strong> — RootCA + SubCA plus the public <code>curl.se/ca/cacert.pem</code> CA roots, and writes a <code>netskope_only.pem</code> sidecar. Covers both intercepted traffic and any endpoints the proxy doesn't decrypt (e.g. auth/login flows some proxies exclude), which otherwise fail with certificate errors.<br><br>
+          <strong style="color:var(--t3)">Netskope-only</strong> — RootCA + SubCA only. Only safe if you're certain every connection made by your tools is intercepted by the proxy.
         </p>
       </div>
 

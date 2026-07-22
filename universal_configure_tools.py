@@ -480,7 +480,10 @@ if '--rollback' in sys.argv:
     rollback()
     sys.exit(0)
 
-full_bundle = '--full-bundle' in sys.argv
+# Default is now the full bundle (Netskope + public CA roots) — pass
+# --netskope-only to opt out and get just the two Netskope certs.
+# --full-bundle is accepted as a no-op for backward compatibility.
+full_bundle = '--netskope-only' not in sys.argv
 
 def get_cli_value(flag):
     """Return the value for `--flag VALUE` or `--flag=VALUE`, else None."""
@@ -494,6 +497,15 @@ def get_cli_value(flag):
 # Use an existing PEM bundle instead of downloading (e.g. distributed
 # centrally, or when the download endpoint is unreachable).
 existing_bundle = get_cli_value('--cert-bundle')
+
+# Pre-set download parameters for silent/unattended runs — when tenant + orgkey
+# are both supplied, no prompt is shown even for the values left unset.
+cli_tenant_name = get_cli_value('--tenant-name')
+cli_org_key     = get_cli_value('--org-key')
+cli_cert_name   = get_cli_value('--cert-name')
+cli_cert_dir    = get_cli_value('--cert-dir')
+cli_recreate    = '--recreate' in sys.argv
+silent_download = bool(cli_tenant_name) and bool(cli_org_key)
 
 # ─── Install mode ─────────────────────────────────────────────────────────────
 
@@ -578,16 +590,21 @@ if existing_bundle:
     ok(f'Using existing certificate bundle: {existing_bundle}')
 else:
     # ─── Download from Netskope ────────────────────────────────────────────
-    cert_name = get_input('Please provide certificate bundle name', 'netskope-cert-bundle.pem')
-    cert_dir = get_input('Please provide certificate bundle location', '~/netskope')
+    cert_name = cli_cert_name or (
+        get_input('Please provide certificate bundle name', 'netskope-cert-bundle.pem')
+        if not silent_download else 'netskope-cert-bundle.pem')
+    cert_dir = cli_cert_dir or (
+        get_input('Please provide certificate bundle location', '~/netskope')
+        if not silent_download else '~/netskope')
     cert_dir = os.path.normpath(os.path.expanduser(cert_dir))
 
     if not os.path.isdir(cert_dir):
         warn(f'{cert_dir} does not exist — creating it')
         os.makedirs(cert_dir, exist_ok=True)
 
-    tenant_name = normalize_tenant(input('Please provide full tenant name (ex: mytenant.eu.goskope.com): '))
-    org_key = input('Please provide tenant orgkey: ').strip()
+    tenant_name = normalize_tenant(cli_tenant_name or input(
+        'Please provide full tenant name (ex: mytenant.eu.goskope.com): '))
+    org_key = (cli_org_key or input('Please provide tenant orgkey: ')).strip()
 
     # Clear a stale REQUESTS_CA_BUNDLE from the process environment if the file no longer exists
     # (e.g. after rollback deleted the bundle in the same shell session).
@@ -607,7 +624,15 @@ else:
     cert_was_recreated = False
     if os.path.isfile(os.path.join(cert_dir, cert_name)):
         warn(f'{cert_name} already exists in {cert_dir}.')
-        recreate = input('Recreate Certificate Bundle? (y/N) ').strip().lower()
+        if cli_recreate:
+            recreate = 'y'
+        elif silent_download:
+            # Silent/unattended run — don't block on a prompt. Pass --recreate
+            # to force regenerating an existing bundle.
+            info('Keeping existing bundle (pass --recreate to force regeneration).')
+            recreate = 'n'
+        else:
+            recreate = input('Recreate Certificate Bundle? (y/N) ').strip().lower()
         if recreate == 'y':
             create_cert_bundle()
             cert_was_recreated = True
@@ -617,7 +642,13 @@ else:
 
 # --- Replay script ---
 _replay_ext = 'bat' if is_windows else 'sh'
-create_replay = input(f'Create replay script (configured_tools.{_replay_ext})? (y/N) ').strip().lower() == 'y'
+# Always create the replay script in a silent/unattended run or when using an
+# existing bundle non-interactively — matches the shell scripts' behavior of
+# writing it unconditionally, so silent runs never block on this prompt.
+if silent_download or existing_bundle:
+    create_replay = '--no-replay' not in sys.argv
+else:
+    create_replay = input(f'Create replay script (configured_tools.{_replay_ext})? (y/N) ').strip().lower() == 'y'
 configured_tools_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'configured_tools.{_replay_ext}')
 if create_replay:
     with open(configured_tools_file, 'w') as f:
@@ -887,7 +918,9 @@ def configure_tool(tool_name, env_var, check_command, post_command=None):
     print()
     if command_exists(check_command):
         info(f'{_BLD}{tool_name}{_RST} is installed')
-        subprocess.run(f'{check_command} --version', shell=True)
+        # Not all OpenSSL builds understand --version (older builds only accept "version").
+        version_command = 'openssl version' if check_command == 'openssl' else f'{check_command} --version'
+        subprocess.run(version_command, shell=True)
         if env_var:
             current_env = _env_before_run.get(env_var)
             if current_env == os.path.join(cert_dir, cert_name):
@@ -937,8 +970,16 @@ tools = [
     ("Azure CLI", "REQUESTS_CA_BUNDLE", "az", ""),
     ("Oracle Cloud CLI", "REQUESTS_CA_BUNDLE", "oci", ""),
     ("Cargo Package Manager", "SSL_CERT_FILE", "cargo", ""),
-    ("Yarn", None, "yarnpkg", f'yarnpkg config set httpsCaFilePath {_cert_path}')
 ]
+
+# Yarn's binary name differs by platform: Homebrew (macOS) and most Linux
+# distros ship "yarn"; Debian/Ubuntu's apt package ships "yarnpkg" instead
+# because a conflicting "yarn" binary already exists there.
+_yarn_cmd = next((c for c in ('yarn', 'yarnpkg') if command_exists(c)), None)
+if _yarn_cmd:
+    tools.append(("Yarn", None, _yarn_cmd, f'{_yarn_cmd} config set httpsCaFilePath {_cert_path}'))
+else:
+    tools.append(("Yarn", None, "yarn", ""))
 
 # --- Python: find all installations and patch each one ---
 header('Python')

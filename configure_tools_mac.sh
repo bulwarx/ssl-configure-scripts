@@ -137,18 +137,42 @@ if [ "$1" = "--rollback" ]; then
     rollback
 fi
 
-# Check for full-bundle mode (default: Netskope-only) and existing-bundle path
-full_bundle=0
+# Check for netskope-only mode (default: full bundle, Netskope + public CA
+# roots) and existing-bundle path. --full-bundle is accepted as a no-op for
+# backward compatibility since it is now the default.
+full_bundle=1
 cert_bundle=""
+tenantName=""
+orgKey=""
+certName=""
+certDir=""
+recreate_cert=0
 prev=""
 for arg in "$@"; do
-    [ "$arg" = "--full-bundle" ] && full_bundle=1
+    [ "$arg" = "--netskope-only" ] && full_bundle=0
+    [ "$arg" = "--recreate" ] && recreate_cert=1
     case "$arg" in
-        --cert-bundle=*) cert_bundle="${arg#*=}" ;;
+        --cert-bundle=*)  cert_bundle="${arg#*=}" ;;
+        --tenant-name=*)  tenantName="${arg#*=}" ;;
+        --org-key=*)      orgKey="${arg#*=}" ;;
+        --cert-name=*)    certName="${arg#*=}" ;;
+        --cert-dir=*)     certDir="${arg#*=}" ;;
     esac
-    [ "$prev" = "--cert-bundle" ] && cert_bundle="$arg"
+    case "$prev" in
+        --cert-bundle)  cert_bundle="$arg" ;;
+        --tenant-name)  tenantName="$arg" ;;
+        --org-key)      orgKey="$arg" ;;
+        --cert-name)    certName="$arg" ;;
+        --cert-dir)     certDir="$arg" ;;
+    esac
     prev="$arg"
 done
+
+# Tenant + orgkey supplied via CLI means this is a silent/unattended run —
+# recorded now, before any prompt fills these in, so later checks can tell
+# "supplied on the command line" apart from "answered a prompt".
+silent_download=0
+[ -n "$tenantName" ] && [ -n "$orgKey" ] && silent_download=1
 
 # Function to create or update certificate bundle
 # Fetch each URL into a temp file first and verify HTTP status (-f fails fast
@@ -185,11 +209,14 @@ create_cert_bundle() {
   cat "$tmp_sub" >> "$certDir/$certName"
   if [ $full_bundle -eq 1 ]; then
     cat "$tmp_pub" >> "$certDir/$certName"
+    # Netskope-only sidecar for tools/endpoints that bypass the proxy and need the minimal set.
+    cat "$tmp_root" "$tmp_sub" > "$certDir/netskope_only.pem"
   fi
 }
 
-# Prompt for an existing bundle if not supplied via --cert-bundle.
-if [ -z "$cert_bundle" ]; then
+# Prompt for an existing bundle if not supplied via --cert-bundle. Skipped
+# entirely for a silent/unattended run (tenant + orgkey already supplied).
+if [ -z "$cert_bundle" ] && [ $silent_download -eq 0 ]; then
   read -p "Use an existing certificate bundle instead of downloading? (y/N) " -n 1 -r
   echo
   if [[ $REPLY =~ ^[Yy]$ ]]; then
@@ -213,18 +240,27 @@ if [ -n "$cert_bundle" ]; then
   echo "Using existing certificate bundle: $certDir/$certName"
 else
   # Download from Netskope
-  read -p "Please provide certificate bundle name [netskope-cert-bundle.pem]: " certName
+  if [ -z "$certName" ] && [ $silent_download -eq 0 ]; then
+    read -p "Please provide certificate bundle name [netskope-cert-bundle.pem]: " certName
+  fi
   certName=${certName:-netskope-cert-bundle.pem}
-  read -p "Please provide certificate bundle location [~/netskope]: " certDir
+  if [ -z "$certDir" ] && [ $silent_download -eq 0 ]; then
+    read -p "Please provide certificate bundle location [~/netskope]: " certDir
+  fi
   certDir=${certDir:-~/netskope}
+  certDir="${certDir/#\~/$HOME}"
   if [ ! -d "$certDir" ]; then
     echo "$certDir does not exist."
     echo "creating $certDir"
     mkdir -p $certDir
   fi
 
-  read -p "Please provide full tenant name (ex: mytenant.eu.goskope.com): " tenantName
-  read -p "Please provide tenant orgkey: " orgKey
+  if [ -z "$tenantName" ]; then
+    read -p "Please provide full tenant name (ex: mytenant.eu.goskope.com): " tenantName
+  fi
+  if [ -z "$orgKey" ]; then
+    read -p "Please provide tenant orgkey: " orgKey
+  fi
 
   # Strip https://, http://, and any path suffix so the cert URL splices cleanly.
   tenantName="${tenantName#https://}"
@@ -244,10 +280,18 @@ else
 
   if [ -f "$certDir/$certName" ]; then
     echo "$certName already exists in $certDir."
-    read -p "Recreate Certificate Bundle? (y/N) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ $recreate_cert -eq 1 ]; then
       create_cert_bundle
+    elif [ $silent_download -eq 1 ]; then
+      # Silent/unattended run (tenant + orgkey supplied via CLI) — don't block on a
+      # prompt. Pass --recreate to force regenerating an existing bundle.
+      echo "Keeping existing bundle (pass --recreate to force regeneration)."
+    else
+      read -p "Recreate Certificate Bundle? (y/N) " -n 1 -r
+      echo
+      if [[ $REPLY =~ ^[Yy]$ ]]; then
+        create_cert_bundle
+      fi
     fi
   else
     create_cert_bundle
@@ -260,11 +304,12 @@ configure_tool() {
   local env_var=$2
   local check_command=$3
   local post_command=$4
+  local version_command=${5:-"$check_command --version"}
 
   echo
   if command_exists $check_command; then
     echo "$tool_name is installed"
-    $check_command --version
+    $version_command
     if [[ -n "$env_var" ]]; then
       if [[ ${!env_var} == "$certDir/$certName" ]]; then
         echo "$tool_name already configured"
@@ -289,10 +334,11 @@ configure_tool() {
 
 # Configure tools
 configure_tool "Git" "GIT_SSL_CAINFO" "git" ""
-configure_tool "OpenSSL" "SSL_CERT_FILE" "openssl" ""
+# LibreSSL/Apple's system openssl doesn't understand --version, only "version".
+configure_tool "OpenSSL" "SSL_CERT_FILE" "openssl" "" "openssl version"
 configure_tool "cURL" "SSL_CERT_FILE" "curl" ""
 configure_tool "Python Requests Library" "REQUESTS_CA_BUNDLE" "" ""
-configure_tool "AWS CLI" "AWS_CA_BUNDLE" "awscli" ""
+configure_tool "AWS CLI" "AWS_CA_BUNDLE" "aws" ""
 configure_tool "Google Cloud CLI" "" "gcloud" "gcloud config set core/custom_ca_certs_file $certDir/$certName"
 configure_tool "NodeJS Package Manager (NPM)" "" "npm" "npm config set cafile $certDir/$certName"
 configure_tool "NodeJS" "NODE_EXTRA_CA_CERTS" "node" ""
@@ -301,9 +347,10 @@ configure_tool "PHP Composer" "" "composer" "composer config --global cafile $ce
 configure_tool "GoLang" "SSL_CERT_FILE" "go" ""
 configure_tool "Azure CLI" "REQUESTS_CA_BUNDLE" "az" ""
 configure_tool "Python PIP" "REQUESTS_CA_BUNDLE" "pip3" ""
-configure_tool "Oracle Cloud CLI" "REQUESTS_CA_BUNDLE" "oci-cli" ""
+configure_tool "Oracle Cloud CLI" "REQUESTS_CA_BUNDLE" "oci" ""
 configure_tool "Cargo Package Manager" "SSL_CERT_FILE" "cargo" ""
-configure_tool "Yarn" "" "yarnpkg" "yarnpkg config set httpsCaFilePath $certDir/$certName"
+# Homebrew installs the Yarn binary as "yarn" (unlike Debian, which ships it as "yarnpkg").
+configure_tool "Yarn" "" "yarn" "yarn config set httpsCaFilePath $certDir/$certName"
 
 # Check if Azure Storage Explorer exists
 echo

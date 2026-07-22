@@ -13,9 +13,11 @@ set "RST=%ESC%[0m"
 :: Check for rollback mode
 if /i "%~1"=="rollback" goto :do_rollback
 
-:: Check for full-bundle mode (default: Netskope-only)
-set fullBundle=0
-for %%a in (%*) do if /i "%%a"=="full-bundle" set fullBundle=1
+:: Check for netskope-only mode (default: full bundle, Netskope + public CA
+:: roots). "full-bundle" is accepted as a no-op for backward compatibility
+:: since it is now the default.
+set fullBundle=1
+for %%a in (%*) do if /i "%%a"=="netskope-only" set fullBundle=0
 
 :: Optionally use an existing bundle instead of downloading
 set "certBundle="
@@ -112,7 +114,12 @@ if /i "%recreate%"=="y" (
     if exist "%certDir%\%certName%" del /f /q "%certDir%\%certName%" >NUL 2>&1
     type "%_tmp_root%" >> "%certDir%\%certName%"
     type "%_tmp_sub%"  >> "%certDir%\%certName%"
-    if "%fullBundle%"=="1" type "%_tmp_pub%" >> "%certDir%\%certName%"
+    if "%fullBundle%"=="1" (
+        type "%_tmp_pub%" >> "%certDir%\%certName%"
+        if exist "%certDir%\netskope_only.pem" del /f /q "%certDir%\netskope_only.pem" >NUL 2>&1
+        type "%_tmp_root%" >> "%certDir%\netskope_only.pem"
+        type "%_tmp_sub%"  >> "%certDir%\netskope_only.pem"
+    )
     del /q "%_tmp_root%" "%_tmp_sub%" "%_tmp_pub%" 2>NUL
 
     echo %GRN%Cert bundle created: %certDir%\%certName%%RST%
@@ -501,7 +508,7 @@ if %ERRORLEVEL% EQU 0 (
 :: %3 - Command to set the new configuration
 :: %4 - Command to log configuration
 echo %GRN%%~1 is installed%RST%
-%~1 --version
+if /i "%~1"=="openssl" (openssl version) else (%~1 --version)
 set toolConfigured=0
 for /f "tokens=*" %%P in ('%~2') do set toolConfigured=%%P
 if "%toolConfigured%"=="%certDir%\%certName%" (

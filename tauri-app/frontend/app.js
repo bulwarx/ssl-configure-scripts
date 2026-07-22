@@ -62,7 +62,7 @@ async function saveFileDialog(defaultName, content) {
 // ── App state ─────────────────────────────────────────────────
 
 let step = 1;
-let bundleType = 'ns';
+let bundleType = 'full';
 let certSource = 'download';   // 'download' | 'existing'
 let mode = 'configure';
 let detectedTools = [];
@@ -529,7 +529,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const platform = inTauriApp()
     ? (navigator.userAgent.includes('Windows') ? 'Windows' : navigator.platform)
     : navigator.platform;
-  document.getElementById('sb-footer').textContent = `v0.2.0 · ${platform}`;
+  document.getElementById('sb-footer').textContent = `v0.3.0 · ${platform}`;
 
   render();
 
