@@ -666,7 +666,16 @@ if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
     $certPath = Join-Path $certDir $certName
 
     if ($srcPath -ne $certPath) {
-        Copy-Item -Path $srcPath -Destination $certPath -Force
+        try {
+            Copy-Item -Path $srcPath -Destination $certPath -Force -ErrorAction Stop
+        } catch {
+            Write-Err "Failed to copy certificate bundle to: $certPath ($_)"
+            exit 1
+        }
+        if (-not (Test-Path $certPath -PathType Leaf)) {
+            Write-Err "Certificate bundle copy did not produce a file at: $certPath"
+            exit 1
+        }
         Write-Ok "Copied certificate bundle to: $certPath"
     }
     $certWasRecreated = $true   # treat as freshly provided so stores are (re)configured

@@ -640,7 +640,14 @@ if existing_bundle:
     bundle_path = os.path.join(cert_dir, cert_name)
 
     if os.path.normpath(existing_bundle) != os.path.normpath(bundle_path):
-        shutil.copy2(existing_bundle, bundle_path)
+        try:
+            shutil.copy2(existing_bundle, bundle_path)
+        except OSError as e:
+            err(f'Failed to copy certificate bundle to: {bundle_path} ({e})')
+            sys.exit(1)
+        if not os.path.isfile(bundle_path):
+            err(f'Certificate bundle copy did not produce a file at: {bundle_path}')
+            sys.exit(1)
         ok(f'Copied certificate bundle to: {bundle_path}')
 
     # Treat as freshly provided so Python/Java stores are (re)configured.

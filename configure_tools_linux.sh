@@ -274,7 +274,14 @@ if [ -n "$cert_bundle" ]; then
   src_full="$(cd "$(dirname "$cert_bundle")" && pwd)/$(basename "$cert_bundle")"
   dst_full="$certDir/$certName"
   if [ "$src_full" != "$dst_full" ]; then
-    cp "$cert_bundle" "$dst_full"
+    if ! cp "$cert_bundle" "$dst_full"; then
+      echo "Failed to copy certificate bundle to: $dst_full" >&2
+      exit 1
+    fi
+    if [ ! -f "$dst_full" ]; then
+      echo "Certificate bundle copy did not produce a file at: $dst_full" >&2
+      exit 1
+    fi
     echo "Copied certificate bundle to: $dst_full"
   fi
   echo "Using existing certificate bundle: $dst_full"
