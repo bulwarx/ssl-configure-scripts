@@ -69,6 +69,7 @@ jobs:
           rm -rf ~/netskope
           out=$(python3 universal_configure_tools.py --cert-bundle /tmp/fixture.pem 2>&1 || true)
           echo "$out"
+          echo "$out" | grep -q "Traceback (most recent call last)" && { echo "::error::python: script raised an unhandled exception"; exit 1; }
           echo "$out" | grep -q "Using existing certificate bundle" || { echo "::error::python: did not report using the cert bundle"; exit 1; }
           echo "$out" | grep -qi "please provide" && { echo "::error::python: script prompted for tenant/orgkey/etc"; exit 1; }
           echo "$out" | grep -q "Copied certificate bundle to" || { echo "::error::python: did not copy the bundle to the canonical ~/netskope location"; exit 1; }
@@ -81,6 +82,7 @@ jobs:
           out=$(python3 universal_configure_tools.py --cert-bundle /tmp/fixture.pem \
             --tenant-name fake.example.com --org-key fakekey 2>&1 || true)
           echo "$out"
+          echo "$out" | grep -q "Traceback (most recent call last)" && { echo "::error::python: script raised an unhandled exception"; exit 1; }
           echo "$out" | grep -q "Using existing certificate bundle" || { echo "::error::python: did not use the cert bundle when tenant/orgkey were also given"; exit 1; }
           echo "$out" | grep -qi "tenant reachable\|tenant unreachable" && { echo "::error::python: attempted tenant reachability despite --cert-bundle being given"; exit 1; }
           true

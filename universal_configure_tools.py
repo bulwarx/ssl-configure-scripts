@@ -90,10 +90,7 @@ def get_shell():
 shell = get_shell()
 
 def command_exists(command):
-    if is_windows:
-        return shutil.which(command) is not None
-    return subprocess.call(['command', '-v', command],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    return shutil.which(command) is not None
 
 
 def get_persistent_env_var(var_name):
