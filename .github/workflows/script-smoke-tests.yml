@@ -30,7 +30,7 @@ jobs:
       - name: bash — --cert-bundle is silent and uses the given bundle
         timeout-minutes: 3
         run: |
-          out=$(bash configure_tools_linux.sh --cert-bundle /tmp/fixture.pem 2>&1)
+          out=$(bash configure_tools_linux.sh --cert-bundle /tmp/fixture.pem 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "Using existing certificate bundle" || { echo "::error::did not report using the cert bundle"; exit 1; }
           echo "$out" | grep -qi "please provide" && { echo "::error::script prompted for tenant/orgkey/etc"; exit 1; }
@@ -41,7 +41,7 @@ jobs:
         timeout-minutes: 3
         run: |
           out=$(bash configure_tools_linux.sh --cert-bundle /tmp/fixture.pem \
-            --tenant-name fake.example.com --org-key fakekey 2>&1)
+            --tenant-name fake.example.com --org-key fakekey 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "Using existing certificate bundle" || { echo "::error::did not use the cert bundle when tenant/orgkey were also given"; exit 1; }
           echo "$out" | grep -qi "tenant reachable\|tenant unreachable" && { echo "::error::attempted tenant reachability despite --cert-bundle being given"; exit 1; }
@@ -59,8 +59,10 @@ jobs:
       - name: python — --cert-bundle is silent and uses the given bundle
         timeout-minutes: 3
         run: |
-          pip install -q -r requirements.txt
-          out=$(python3 universal_configure_tools.py --cert-bundle /tmp/fixture.pem 2>&1)
+          # Ubuntu's system Python is "externally managed" (PEP 668) — this is a
+          # fully throwaway CI runner, so bypassing that restriction is safe.
+          pip install --break-system-packages -q -r requirements.txt
+          out=$(python3 universal_configure_tools.py --cert-bundle /tmp/fixture.pem 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "Using existing certificate bundle" || { echo "::error::python: did not report using the cert bundle"; exit 1; }
           echo "$out" | grep -qi "please provide" && { echo "::error::python: script prompted for tenant/orgkey/etc"; exit 1; }
@@ -70,7 +72,7 @@ jobs:
         timeout-minutes: 3
         run: |
           out=$(python3 universal_configure_tools.py --cert-bundle /tmp/fixture.pem \
-            --tenant-name fake.example.com --org-key fakekey 2>&1)
+            --tenant-name fake.example.com --org-key fakekey 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "Using existing certificate bundle" || { echo "::error::python: did not use the cert bundle when tenant/orgkey were also given"; exit 1; }
           echo "$out" | grep -qi "tenant reachable\|tenant unreachable" && { echo "::error::python: attempted tenant reachability despite --cert-bundle being given"; exit 1; }
@@ -120,19 +122,39 @@ jobs:
         shell: cmd
         timeout-minutes: 3
         run: |
-          configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem > out1.txt 2>&1
+          call configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem > out1.txt 2>&1
           type out1.txt
-          findstr /i /c:"Using existing certificate bundle" out1.txt >nul || (echo ::error::did not report using the cert bundle & exit /b 1)
-          findstr /i /c:"Please provide" out1.txt >nul && (echo ::error::script prompted interactively & exit /b 1)
+          findstr /i /c:"Using existing certificate bundle" out1.txt >nul
+          if %ERRORLEVEL% NEQ 0 (
+              echo TEST FAILED: did not report using the cert bundle
+              exit /b 1
+          )
+          findstr /i /c:"Please provide" out1.txt >nul
+          if %ERRORLEVEL% EQU 0 (
+              echo TEST FAILED: script prompted interactively
+              exit /b 1
+          )
           exit /b 0
 
       - name: cmd — cert-bundle= overrides stale tenant-name=/org-key=
         shell: cmd
         timeout-minutes: 3
         run: |
-          configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem tenant-name=fake.example.com org-key=fakekey > out2.txt 2>&1
+          call configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem tenant-name=fake.example.com org-key=fakekey > out2.txt 2>&1
           type out2.txt
-          findstr /i /c:"Using existing certificate bundle" out2.txt >nul || (echo ::error::did not use the cert bundle when tenant/orgkey were also given & exit /b 1)
-          findstr /i /c:"Tenant Reachable" out2.txt >nul && (echo ::error::attempted tenant reachability despite cert-bundle being given & exit /b 1)
-          findstr /i /c:"Tenant Unreachable" out2.txt >nul && (echo ::error::attempted tenant reachability despite cert-bundle being given & exit /b 1)
+          findstr /i /c:"Using existing certificate bundle" out2.txt >nul
+          if %ERRORLEVEL% NEQ 0 (
+              echo TEST FAILED: did not use the cert bundle when tenant/orgkey were also given
+              exit /b 1
+          )
+          findstr /i /c:"Tenant Reachable" out2.txt >nul
+          if %ERRORLEVEL% EQU 0 (
+              echo TEST FAILED: attempted tenant reachability despite cert-bundle being given
+              exit /b 1
+          )
+          findstr /i /c:"Tenant Unreachable" out2.txt >nul
+          if %ERRORLEVEL% EQU 0 (
+              echo TEST FAILED: attempted tenant reachability despite cert-bundle being given
+              exit /b 1
+          )
           exit /b 0

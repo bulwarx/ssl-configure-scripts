@@ -657,11 +657,11 @@ if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
 } else {
     # ─── Download from Netskope ───────────────────────────────────────────────
     if ([string]::IsNullOrWhiteSpace($certName)) {
-        $certName = Read-Default 'Certificate bundle name' 'netskope-cert-bundle.pem'
+        $certName = if ($silentRun) { 'netskope-cert-bundle.pem' } else { Read-Default 'Certificate bundle name' 'netskope-cert-bundle.pem' }
     } else { Write-Log "certName: $certName" }
 
     if ([string]::IsNullOrWhiteSpace($certDir)) {
-        $certDir = Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope')
+        $certDir = if ($silentRun) { Join-Path $env:USERPROFILE 'netskope' } else { Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope') }
     } else { Write-Log "certDir: $certDir" }
 
     $certDir  = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))

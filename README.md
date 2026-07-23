@@ -120,8 +120,8 @@ By default the bundle contains the two Netskope certs (RootCA + SubCA) plus the 
 # Windows CMD
 configure_tools_windows.cmd netskope-only
 
-# Windows PowerShell — set in the pre-set params block at the top of the file
-# $netskopeOnly = $true
+# Windows PowerShell
+pwsh -File .\configure_tools_windows.ps1 -NetskopeOnly
 
 # Python
 python universal_configure_tools.py --netskope-only
@@ -141,11 +141,11 @@ If you already have a certificate bundle — distributed centrally, or when the 
 # Python
 python universal_configure_tools.py --cert-bundle /path/to/bundle.pem
 
-# Windows PowerShell — set in the pre-set params block at the top of the file
-# $certBundle = "C:\path\to\bundle.pem"
+# Windows PowerShell
+pwsh -File .\configure_tools_windows.ps1 -CertBundle C:\path\to\bundle.pem
 
-# Windows CMD — answer "y" when prompted to use an existing bundle
-configure_tools_windows.cmd
+# Windows CMD
+configure_tools_windows.cmd cert-bundle=C:\path\to\bundle.pem
 ```
 
 The interactive scripts (CMD and the `.sh` scripts) also prompt _"Use an existing certificate bundle instead of downloading?"_ when no flag is given.
@@ -164,8 +164,8 @@ Every script supports a rollback mode that removes all Netskope SSL configuratio
 # Windows CMD
 configure_tools_windows.cmd rollback
 
-# Windows PowerShell — set $rollback = $true at the top of the file
-pwsh -File .\configure_tools_windows.ps1
+# Windows PowerShell
+pwsh -File .\configure_tools_windows.ps1 -Rollback
 
 # Any platform (Python 3)
 python universal_configure_tools.py --rollback
@@ -201,6 +201,10 @@ python universal_configure_tools.py --cert-bundle /path/to/bundle.pem
 # Windows CMD (bare key=value flags, no leading dashes; also: recreate, create-replay, netskope-only, rollback)
 configure_tools_windows.cmd cert-bundle=C:\netskope\bundle.pem
 configure_tools_windows.cmd tenant-name=mytenant.eu.goskope.com org-key=your-org-key
+
+# A value containing spaces (e.g. under "C:\Program Files") must have the
+# whole key=value pair quoted, not just the path:
+configure_tools_windows.cmd "cert-bundle=C:\Program Files\netskope\bundle.pem"
 ```
 
 ### Windows PowerShell
@@ -243,6 +247,50 @@ Run `Get-Help .\configure_tools_windows.ps1 -Full` for parameter descriptions an
 | **BigFix** | Parameters embedded directly in the Fixlet action script | Bake the flags into the action script text |
 
 Across every tool, the safest option against policy-log/process-list exposure is still `--cert-bundle` — it needs no secret in the command line at all.
+
+### Bundling the cert with an Intune Win32 app package
+
+If you package the `.pem` file inside the `.intunewin` alongside the script (rather than pre-staging it via a separate configuration profile), don't point `-CertBundle`/`--cert-bundle` directly at the package's own content path. **Intune extracts Win32 app content into a temporary staging folder that gets deleted once install completes** — every tool would end up configured to point at a file that no longer exists a few minutes later.
+
+Bundle a small wrapper script in the package alongside `configure_tools_windows.ps1` and `bundle.pem`, and point Intune's "Install command" at the wrapper instead of the main script directly. The wrapper copies the bundle to a stable location first, then runs the real script against that stable copy:
+
+```powershell
+# wrapper.ps1 — packaged alongside configure_tools_windows.ps1 and bundle.pem
+$stableDir  = Join-Path $env:ProgramData 'netskope'
+$stablePath = Join-Path $stableDir 'bundle.pem'
+New-Item -ItemType Directory -Force -Path $stableDir | Out-Null
+Copy-Item -Path (Join-Path $PSScriptRoot 'bundle.pem') -Destination $stablePath -Force
+& (Join-Path $PSScriptRoot 'configure_tools_windows.ps1') -CertBundle $stablePath
+```
+
+```
+# Intune "Install command"
+powershell.exe -ExecutionPolicy Bypass -File wrapper.ps1
+```
+
+Use that same stable path (`%ProgramData%\netskope\bundle.pem`) as the Win32 app's **detection rule** (File exists) — Intune only marks the app installed once the copy actually succeeded, and won't try to reinstall on every check-in once it has.
+
+For ongoing drift-checking with **Intune Proactive Remediations**, gate the remediation half on the bundle's presence before doing anything else — a remediation script can't conjure the bundle back from nowhere if it's missing, it can only re-run the configure step against a copy that's still there:
+
+```powershell
+# detection script
+if (-not (Test-Path "$env:ProgramData\netskope\bundle.pem")) {
+    Write-Output "Cert bundle missing at expected location"
+    exit 1   # non-compliant — triggers the remediation script
+}
+exit 0
+```
+
+```powershell
+# remediation script
+$stablePath = "$env:ProgramData\netskope\bundle.pem"
+if (Test-Path $stablePath) {
+    pwsh -File "C:\path\to\configure_tools_windows.ps1" -CertBundle $stablePath
+} else {
+    Write-Error "Cert bundle not found at $stablePath — cannot remediate without re-deploying the Win32 app package"
+    exit 1
+}
+```
 
 ## Replay Script
 
