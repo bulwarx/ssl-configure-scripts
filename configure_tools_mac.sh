@@ -247,7 +247,14 @@ if [ -z "$cert_bundle" ] && [ $silent_download -eq 0 ]; then
 fi
 
 if [ -n "$cert_bundle" ]; then
-  # Existing bundle: validate and use in place, no download
+  # Existing bundle: validate, then copy to the canonical certDir/certName
+  # location (--cert-dir/--cert-name if given, else the same defaults as the
+  # download path) so every tool ends up configured against a stable path —
+  # not wherever the source file happened to live. This matters for MDM
+  # deployment: an Intune Win32 app's staged package content is deleted
+  # right after the install command finishes, so a script bundled alongside
+  # the cert just needs to point --cert-bundle at its own package directory
+  # and this copies it out to somewhere permanent before that happens.
   cert_bundle="${cert_bundle/#\~/$HOME}"
   if [ ! -f "$cert_bundle" ]; then
     echo "Certificate bundle not found: $cert_bundle" >&2
@@ -257,9 +264,21 @@ if [ -n "$cert_bundle" ]; then
     echo "$cert_bundle does not contain a PEM certificate." >&2
     exit 1
   fi
-  certDir=$(cd "$(dirname "$cert_bundle")" && pwd)
-  certName=$(basename "$cert_bundle")
-  echo "Using existing certificate bundle: $certDir/$certName"
+
+  certName=${certName:-netskope-cert-bundle.pem}
+  certDir=${certDir:-~/netskope}
+  certDir="${certDir/#\~/$HOME}"
+  if [ ! -d "$certDir" ]; then
+    mkdir -p "$certDir"
+  fi
+
+  src_full="$(cd "$(dirname "$cert_bundle")" && pwd)/$(basename "$cert_bundle")"
+  dst_full="$certDir/$certName"
+  if [ "$src_full" != "$dst_full" ]; then
+    cp "$cert_bundle" "$dst_full"
+    echo "Copied certificate bundle to: $dst_full"
+  fi
+  echo "Using existing certificate bundle: $dst_full"
 else
   # Download from Netskope
   if [ -z "$certName" ] && [ $silent_download -eq 0 ]; then
