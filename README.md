@@ -166,6 +166,89 @@ Rollback reverses: environment variables, Git, cURL `.curlrc`, gcloud, npm, Comp
 
 Every script follows the same rule: once the tenant name + org key (or an existing cert bundle path) resolve to a non-empty value — from a flag/parameter, or a hardcoded default — **every** prompt is skipped, not just the ones that ask for those two values directly. That includes "use an existing bundle?", "recreate certificate bundle?", and "create replay script?".
 
+### Parameters reference
+
+Every parameter below is optional — supply only what a given scenario needs. Naming differs by convention (kebab-case flags for bash/Python, PascalCase named parameters for PowerShell) but the meaning and default are identical unless noted.
+
+| Purpose | bash (`configure_tools_mac.sh` / `_linux.sh`) | Python (`universal_configure_tools.py`) | PowerShell (`configure_tools_windows.ps1`) | Default | Notes |
+|---|---|---|---|---|---|
+| Netskope tenant hostname | `--tenant-name VALUE` | `--tenant-name VALUE` | `-TenantName VALUE` | *(prompted if empty and not running silently)* | e.g. `mytenant.eu.goskope.com`. Combined with the org key, builds the two cert-download URLs. |
+| Netskope org key | `--org-key VALUE` | `--org-key VALUE` | `-OrgKey VALUE` | *(prompted if empty and not running silently)* | Supplying **both** tenant name and org key is what puts a script into silent/unattended mode. |
+| Existing cert bundle path | `--cert-bundle VALUE` | `--cert-bundle VALUE` | `-CertBundle VALUE` (also accepts a bare positional value, see note 1) | *(none — falls through to the download flow, or a prompt, if empty)* | Skips the download entirely; the file is validated for a PEM certificate, then **copied** to the `cert-dir`/`cert-name` location below. Takes precedence over tenant/org-key if both are given. **This is the recommended flag for MDM/at-scale deployment** — see below. |
+| Bundle file name | `--cert-name VALUE` | `--cert-name VALUE` | `-CertName VALUE` | `netskope-cert-bundle.pem` | |
+| Bundle directory | `--cert-dir VALUE` | `--cert-dir VALUE` | `-CertDir VALUE` | `~/netskope` (bash/Python) or `%USERPROFILE%\netskope` (PowerShell) | |
+| Force regeneration | `--recreate` | `--recreate` | `-Recreate` | off | Re-download (or re-copy, if using `--cert-bundle`) even if a bundle already exists at the target path. Without it, an existing file there is reused as-is. |
+| Netskope-only bundle | `--netskope-only` | `--netskope-only` | `-NetskopeOnly` | off (full bundle is the default) | Skips the public `curl.se` CA roots. Only use this if you're certain every connection your tools make is intercepted by the proxy. |
+| Full bundle (explicit) | `--full-bundle` *(no-op — already the default)* | `--full-bundle` *(no-op — already the default)* | *(not declared — passing it throws an error)* | on | Kept in bash/Python only for backward compatibility with older invocations. Don't pass it to the PowerShell script. |
+| Rollback | `--rollback` (see note 2) | `--rollback` (any position) | `-Rollback` (any position) | off | Removes all Netskope SSL configuration from every detected tool. Doesn't need or touch a cert bundle file. |
+| Replay script | *(always written — no flag)* | `--no-replay` (see note 3) | `-CreateReplay` (see note 3) | see note 3 | Writes `configured_tools.sh` / `.ps1` / `.bat`, recording every configuration command applied, for reuse on another machine (see [Replay Script](#replay-script)). |
+
+**Notes:**
+1. `-CertBundle` is the only PowerShell parameter that also accepts a bare, unnamed value: `pwsh -File configure_tools_windows.ps1 C:\bundle.pem` works the same as `-CertBundle C:\bundle.pem`. Every other PowerShell parameter must be named.
+2. In the bash scripts, `--rollback` only triggers rollback if it is **literally the first argument** (`$1`) — e.g. `./configure_tools_mac.sh --rollback` works, but `./configure_tools_mac.sh --cert-dir ~/x --rollback` does not trigger rollback. Python and PowerShell recognize `--rollback`/`-Rollback` in any position.
+3. Replay-script behavior differs by script: the **bash scripts always write `configured_tools.sh`**, unconditionally, with no way to opt out. **Python** creates it by default during a silent/unattended run (tenant+org-key, or `--cert-bundle`) unless you pass `--no-replay`; interactively it still asks. **PowerShell** is the opposite polarity — `-CreateReplay` is an opt-in switch (off by default, even during a silent run); without it, a silent PowerShell run simply skips the replay file rather than asking.
+4. Named-value flags accept both `--flag value` and `--flag=value` in bash/Python. PowerShell uses `-Flag value` or `-Flag:value` — the `-Flag=value` form is not supported.
+
+### Usage examples by scenario
+
+```sh
+# Interactive (no flags) — prompts for everything, sensible defaults offered
+./configure_tools_mac.sh
+./configure_tools_linux.sh
+pwsh -File .\configure_tools_windows.ps1
+python universal_configure_tools.py
+```
+
+```sh
+# Silent download with tenant + org key — no prompts, but the org key is
+# visible on the command line (process list / MDM policy logs). Fine for a
+# single machine; prefer the --cert-bundle scenario below for fleet deployment.
+./configure_tools_mac.sh    --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+./configure_tools_linux.sh  --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+pwsh -File .\configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key
+python universal_configure_tools.py --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+```
+
+```sh
+# Silent deployment with a pre-distributed bundle (recommended for MDM/at-scale —
+# see "Creating a cert bundle manually" above for how to produce bundle.pem)
+./configure_tools_mac.sh   --cert-bundle /path/to/bundle.pem
+./configure_tools_linux.sh --cert-bundle /path/to/bundle.pem
+pwsh -File .\configure_tools_windows.ps1 -CertBundle C:\netskope\bundle.pem
+python universal_configure_tools.py --cert-bundle /path/to/bundle.pem
+```
+
+```sh
+# Netskope-only bundle, silent (skip the public CA roots)
+./configure_tools_mac.sh --tenant-name mytenant.eu.goskope.com --org-key your-org-key --netskope-only
+pwsh -File .\configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key -NetskopeOnly
+python universal_configure_tools.py --cert-bundle /path/to/bundle.pem --netskope-only
+```
+
+```sh
+# Custom bundle name/location, forcing a fresh download even if one already exists
+./configure_tools_mac.sh --tenant-name mytenant.eu.goskope.com --org-key your-org-key \
+  --cert-name corp-bundle.pem --cert-dir /opt/netskope --recreate
+
+pwsh -File .\configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key `
+  -CertName corp-bundle.pem -CertDir C:\ProgramData\netskope -Recreate
+```
+
+```sh
+# Rollback — undo everything, on every platform
+./configure_tools_mac.sh --rollback           # must be the first argument, see note 2 above
+./configure_tools_linux.sh --rollback         # ditto
+pwsh -File .\configure_tools_windows.ps1 -Rollback
+python universal_configure_tools.py --rollback
+```
+
+```sh
+# Replay script control (see note 3 above for why the flags/defaults differ)
+python universal_configure_tools.py --cert-bundle /path/to/bundle.pem --no-replay   # opt out
+pwsh -File .\configure_tools_windows.ps1 -CertBundle C:\netskope\bundle.pem -CreateReplay  # opt in
+# bash: no flag needed — configured_tools.sh is always written
+```
+
 ### Recommended for MDM / at-scale deployment: distribute an existing bundle
 
 If you're pushing this via Intune, Jamf, SCCM, or BigFix to machines, prefer `--cert-bundle` (or `-CertBundle`) over the tenant+org-key download path.
@@ -208,55 +291,13 @@ $pub = (Invoke-WebRequest -Uri "https://curl.se/ca/cacert.pem" -SkipCertificateC
 
 The order matters — RootCA, then SubCA, then (optionally) the public roots — since that's the chain order every script here produces and validates against.
 
-### Command-line flags / parameters (bash, Python)
-
-```sh
-# Linux / macOS
-./configure_tools_linux.sh --cert-bundle /path/to/bundle.pem
-./configure_tools_mac.sh   --tenant-name mytenant.eu.goskope.com --org-key your-org-key
-
-# Optional: --cert-name, --cert-dir, --recreate (force re-download if the bundle already exists)
-./configure_tools_mac.sh --tenant-name mytenant.eu.goskope.com --org-key your-org-key \
-  --cert-name netskope-cert-bundle.pem --cert-dir ~/netskope --recreate
-
-# Python
-python universal_configure_tools.py --cert-bundle /path/to/bundle.pem
-```
-
-### Windows PowerShell
-
-Requires PowerShell 7+ (`pwsh`) — see Requirements above. Two ways to run unattended, for two different deployment situations:
-
-```powershell
-# Named parameters — for anything that lets you supply a full command line
-# (Intune Win32 apps, SCCM, BigFix):
-pwsh -File configure_tools_windows.ps1 -CertBundle C:\netskope\bundle.pem
-pwsh -File configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key -CertName netskope-cert-bundle.pem -CertDir C:\netskope\bundle -Recreate
-```
-
-```powershell
-# Or edit the parameter defaults directly in the file — for contexts that run
-# a .ps1 with no arguments at all (e.g. Intune "platform scripts"):
-param(
-    [string]$TenantName   = "mytenant.eu.goskope.com",
-    [string]$OrgKey       = "your-org-key",
-    [string]$CertName     = "netskope-cert-bundle.pem",
-    [string]$CertDir      = "C:\Users\username\netskope\",
-    [string]$CertBundle   = "",     # set to an existing .pem path to skip the download entirely
-    [switch]$Recreate,              # force re-download on every run
-    [switch]$Rollback,              # undo all Netskope SSL configuration
-    [switch]$NetskopeOnly,          # skip the public curl.se CA bundle (Netskope certs only)
-    [switch]$CreateReplay           # write configured_tools.ps1 without being asked
-)
-```
-
-Run `Get-Help .\configure_tools_windows.ps1 -Full` for parameter descriptions and examples.
+For contexts that run a `.ps1` with no arguments at all (Intune "platform scripts" and similar), edit the parameter defaults directly in `configure_tools_windows.ps1`'s `param()` block instead of passing flags — every parameter from the reference table above has a matching default there. Run `Get-Help .\configure_tools_windows.ps1 -Full` for the built-in parameter descriptions and examples.
 
 ### Deploying via a specific MDM/RMM tool
 
 | Tool | How parameters reach the script | Example |
 |---|---|---|
-| **Intune** — Win32 app | Full "Install command" string, named params work directly | `pwsh -File configure_tools_windows.ps1 -CertBundle "%ProgramData%\netskope\bundle.pem"` |
+| **Intune** — Win32 app | Full "Install command" string, named params work directly | See the [step-by-step walkthrough](#step-by-step-deploying-via-microsoft-intune-win32-app) below |
 | **Intune** — platform script | No arguments possible at all | Edit the `.ps1` parameter defaults before uploading (the bash/Python scripts don't have an equivalent editable-defaults block today — they need at least one flag) |
 | **Jamf Pro** | Only positional `$4`–`$11` script parameters, no named flags | Ship a 1-line wrapper the policy calls instead of contorting the script: `configure_tools_mac.sh --tenant-name "$4" --org-key "$5"` (or `--cert-bundle "$4"` for the recommended path). Consider Jamf's parameter-encryption convention (community.jamf.com) if passing an org key this way. |
 | **SCCM/ConfigMgr** | Full command line (Installation program field) | Same as any silent installer — put the flags directly in the command line |
@@ -264,18 +305,48 @@ Run `Get-Help .\configure_tools_windows.ps1 -Full` for parameter descriptions an
 
 Across every tool, the safest option against policy-log/process-list exposure is still `--cert-bundle` — it needs no secret in the command line at all.
 
-### Bundling the cert with an Intune Win32 app package
+### Step-by-step: deploying via Microsoft Intune (Win32 app)
 
-Package the `.pem` file inside the `.intunewin` alongside the script and point `-CertBundle`/`--cert-bundle` straight at the package's own content path — no wrapper script needed. **Intune extracts Win32 app content into a temporary staging folder that gets deleted once install completes**, but the script itself copies the given bundle to a stable location (`%USERPROFILE%\netskope\netskope-cert-bundle.pem` by default, or wherever `-CertDir`/`-CertName` point) before configuring any tool, so nothing ends up pointing at a path that disappears a few minutes later:
+This is the full path from "I have a `.pem` and a script" to "it's installed on managed devices" — the shorter table above assumes you already know this workflow; this doesn't.
 
+**Prerequisites, before you start:**
+- **The [Microsoft Win32 Content Prep Tool](https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool)** (`IntuneWinAppUtil.exe`) — this is what packages a folder into the `.intunewin` file Intune requires for Win32 apps. Free download, run it on any Windows machine (doesn't need to be a managed device).
+- **PowerShell 7+ (`pwsh.exe`) must already be present on the target devices.** Windows only ships PowerShell 5.1 (`powershell.exe`), which this script does not support (see Requirements above). If your fleet doesn't already have PS7, deploy it first as its own required Win32 app (Microsoft publishes one, or package the [MSI installer](https://aka.ms/powershell)) — the app below won't run without it. Alternatively, use `universal_configure_tools.py` instead, which has the same problem but for Python 3 + `pip install -r requirements.txt` instead of PS7.
+
+**1. Prepare a source folder** containing just the script and the bundle, nothing else:
 ```
-# Intune "Install command"
-pwsh.exe -File configure_tools_windows.ps1 -CertBundle "%~dp0bundle.pem"
+C:\intune-package\
+├── configure_tools_windows.ps1
+└── netskope-cert-bundle.pem      # built via "Creating a cert bundle manually" above
 ```
 
-Use that same stable path as the Win32 app's **detection rule** (File exists) — Intune only marks the app installed once the copy actually succeeded, and won't try to reinstall on every check-in once it has.
+**2. Wrap it into a `.intunewin`:**
+```
+IntuneWinAppUtil.exe -c C:\intune-package -s configure_tools_windows.ps1 -o C:\intune-output
+```
+This produces `C:\intune-output\configure_tools_windows.intunewin`.
 
-For ongoing drift-checking with **Intune Proactive Remediations**, the detection script just checks the stable path; the remediation script re-runs the configure step against the package's bundle (Intune re-stages Win32 app content for each remediation run, or point it at a copy you've placed somewhere permanent):
+**3. Create the Win32 app** in the Intune admin center: **Apps → Windows → Add → Windows app (Win32)** → upload `configure_tools_windows.intunewin`. Give it a name/description on the App information step.
+
+**4. Program tab:**
+```
+Install command:    pwsh.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -CertBundle ".\netskope-cert-bundle.pem"
+Uninstall command:   pwsh.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -Rollback
+Install behavior:    User   ← see the callout below before picking System instead
+```
+Intune runs the install command with its working directory set to the extracted package folder, so the relative `.\netskope-cert-bundle.pem` resolves correctly — no `%~dp0`/`$PSScriptRoot` wrapper needed. The script copies that bundle out to `%USERPROFILE%\netskope\netskope-cert-bundle.pem` (or wherever `-CertDir`/`-CertName` point) before configuring anything, so it survives Intune deleting the staging folder after install.
+
+> **Install behavior: User vs. System — this determines whether the tool actually works.** Everything this script configures — Git, npm, pip/certifi, VS Code settings, Docker's `ca.pem`, the `.curlrc` — lives under the signed-in user's profile (`$env:USERPROFILE`, `$env:APPDATA`). If you set **Install behavior: System**, the script runs as the `SYSTEM` account instead of the real user, so `$env:USERPROFILE` resolves to the SYSTEM profile and every one of those per-user configs gets written somewhere nobody will ever use. **Install behavior: User** is almost always the right choice here — it runs in the actual signed-in user's context, so the per-user configs land in the right place. The one thing that prefers `System` (importing the cert into the machine-wide `LocalMachine\Root` store) still works fine under `User` context: the script tries `LocalMachine\Root` first and automatically falls back to `CurrentUser\Root`, which every browser and CLI tool here already trusts.
+>
+> Because of this, assign the app to a **user group**, not a device group — `Install behavior: User` only runs while that user is signed in.
+
+**5. Requirements tab:** set the minimum OS version and architecture as usual for your fleet; there's nothing this script needs beyond PowerShell 7 (already covered by the prerequisite above).
+
+**6. Detection rules:** add a **File** rule — path `%USERPROFILE%\netskope`, file `netskope-cert-bundle.pem`, "File exists". Intune only marks the app installed once the script has actually copied the bundle to that stable path, and won't try to reinstall it on every subsequent check-in.
+
+**7. Assignment:** assign as **Required** to the user group from step 4. It installs silently the next time each user's device checks in — no interaction, no prompt (beyond whatever SmartScreen shows the first time an unsigned script runs, see the warning section above).
+
+**Optional — ongoing drift-checking with Intune Proactive Remediations:** a separate, lighter-weight mechanism from the Win32 app above — use it to periodically confirm the bundle is still in place and re-apply configuration if not:
 
 ```powershell
 # detection script
@@ -287,9 +358,12 @@ exit 0
 ```
 
 ```powershell
-# remediation script
-pwsh -File "C:\path\to\configure_tools_windows.ps1" -CertBundle "C:\path\to\bundle.pem"
+# remediation script — needs its own copy of the bundle available at this path,
+# e.g. dropped there by the Win32 app above, or a separate config profile
+pwsh -File "C:\path\to\configure_tools_windows.ps1" -CertBundle "$env:USERPROFILE\netskope\netskope-cert-bundle.pem"
 ```
+
+Proactive Remediation scripts also run in the signed-in user's context by default — the same User-vs-System reasoning from step 4 applies here too.
 
 ## Replay Script
 
