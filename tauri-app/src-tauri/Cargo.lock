@@ -3261,7 +3261,7 @@ dependencies = [
 
 [[package]]
 name = "ssl-configurator"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "dirs",
  "regex",

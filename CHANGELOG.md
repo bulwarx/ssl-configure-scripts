@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.1] - 2026-07-23
+
+### Fixed
+- **macOS build was completely unsigned**, which is why opening the app showed the hard "'SSL Configurator' is damaged and can't be opened" error on Apple Silicon — arm64 macOS refuses to run any binary without at least a signature. The build now sets `bundle.macOS.signingIdentity = "-"` in `tauri.conf.json`, which ad-hoc signs the app (free, no Apple Developer account needed) and CI verifies the signature (`codesign --verify`) before packaging. This does **not** notarize the app — Gatekeeper still shows an "unidentified developer" prompt for a downloaded copy (right-click → Open, or `xattr -cr`, still needed), but that's a much milder prompt than the previous hard block. Full notarization (no prompt at all) requires an Apple Developer Program enrollment, which isn't set up.
+
 ## [0.4.0] - 2026-07-23
 
 ### Fixed
