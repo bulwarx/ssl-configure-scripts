@@ -24,7 +24,7 @@ grep -c "BEGIN CERTIFICATE" netskope-cert-bundle.pem
 ```
 
 ```powershell
-# Windows PowerShell
+# Windows PowerShell 7+ (pwsh) — -SkipCertificateCheck isn't available in Windows PowerShell 5.1
 $tenant = "mytenant.eu.goskope.com"
 $orgKey = "your-org-key"
 

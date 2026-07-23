@@ -625,7 +625,7 @@ if existing_bundle:
     # so a script bundled alongside the cert just needs --cert-bundle
     # pointing at its own package directory and this copies it out to
     # somewhere permanent before that happens.
-    existing_bundle = os.path.normpath(os.path.expanduser(existing_bundle))
+    existing_bundle = os.path.abspath(os.path.expanduser(existing_bundle))
     if not os.path.isfile(existing_bundle):
         err(f'Certificate bundle not found: {existing_bundle}')
         sys.exit(1)
@@ -635,11 +635,14 @@ if existing_bundle:
             sys.exit(1)
 
     cert_name = cli_cert_name or 'netskope-cert-bundle.pem'
-    cert_dir = os.path.normpath(os.path.expanduser(cli_cert_dir or '~/netskope'))
+    cert_dir = os.path.abspath(os.path.expanduser(cli_cert_dir or '~/netskope'))
     os.makedirs(cert_dir, exist_ok=True)
     bundle_path = os.path.join(cert_dir, cert_name)
 
-    if os.path.normpath(existing_bundle) != os.path.normpath(bundle_path):
+    # Compare with normcase (case-insensitive on Windows) on already-absolute
+    # paths — a relative --cert-bundle that resolves to the same file as
+    # bundle_path must compare equal, or shutil.copy2 raises SameFileError.
+    if os.path.normcase(existing_bundle) != os.path.normcase(bundle_path):
         try:
             shutil.copy2(existing_bundle, bundle_path)
         except OSError as e:

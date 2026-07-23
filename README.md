@@ -60,7 +60,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 - pnpm
 - Azure Storage Explorer
 
-### Windows scripts (PS1, CMD, Python on Windows)
+### Windows scripts (PS1, Python on Windows)
 - **Python environments** — discovers all installations via Python Launcher (`py`), PATH, and bundled CLIs (e.g. Azure CLI); patches `certifi` with an idempotent marker and sets `pip` global cert
 - **Java / JDK truststores** — discovers JDKs via `JAVA_HOME`, PATH, registry, and common install locations; imports certs via `keytool`
 - **VS Code** — sets `http.systemCertificates: true` in user settings (standard and Insiders editions)
@@ -72,6 +72,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 - Python 3 (for the universal script; platform-specific scripts are standalone)
 - OpenSSL CLI (for cert parsing; bundled with Windows scripts)
 - **PowerShell 7+ (`pwsh`) for `configure_tools_windows.ps1`** — Windows PowerShell 5.1 (the version built into Windows, `powershell.exe`) throws errors partway through the script and is not supported. Install PowerShell 7 from [aka.ms/powershell](https://aka.ms/powershell) (or `winget install Microsoft.PowerShell`) and run the script with `pwsh -File .\configure_tools_windows.ps1`, not `powershell -File ...`.
+
 
 ```
 pip install -r requirements.txt  # install dependencies for the Python script
@@ -103,7 +104,9 @@ pwsh -File .\configure_tools_windows.ps1
 python universal_configure_tools.py
 ```
 
-By default the bundle contains the two Netskope certs (RootCA + SubCA) plus the public `curl.se/ca/cacert.pem` CA roots; pass `--netskope-only`/`-NetskopeOnly` to use just the two Netskope certs, or `--cert-bundle`/`-CertBundle` to use an existing bundle instead of downloading. See **[Usage Examples by Scenario](docs/usage-examples.md)** for these and more (silent deployment, custom bundle location, forced recreation, etc.) and **[Parameters Reference](docs/parameters-reference.md)** for what every flag means.
+By default the bundle contains the two Netskope certs (RootCA + SubCA) plus the public `curl.se/ca/cacert.pem` CA roots.
+pass `--netskope-only` or `-NetskopeOnly` to use just the two Netskope certs, or `--cert-bundle`/`-CertBundle` to use an existing bundle instead of downloading. 
+See **[Usage Examples by Scenario](docs/usage-examples.md)** for these and more (silent deployment, custom bundle location, forced recreation, etc.) and **[Parameters Reference](docs/parameters-reference.md)** for what every flag means.
 
 ## Rollback
 

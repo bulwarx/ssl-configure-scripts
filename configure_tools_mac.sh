@@ -271,6 +271,7 @@ if [ -n "$cert_bundle" ]; then
   if [ ! -d "$certDir" ]; then
     mkdir -p "$certDir"
   fi
+  certDir="$(cd "$certDir" && pwd)"
 
   src_full="$(cd "$(dirname "$cert_bundle")" && pwd)/$(basename "$cert_bundle")"
   dst_full="$certDir/$certName"
