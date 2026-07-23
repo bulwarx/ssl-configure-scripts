@@ -68,7 +68,7 @@ These scripts and the GUI app may be flagged, blocked, or quarantined by antivir
 - **Fetches a certificate from a third party** (the Netskope tenant) and installs it into user and system trust stores.
 - **Modifies user and system environment variables** to point tools at the certificate bundle.
 - **Scans the system for installed applications** (Python, Java/JDK, VS Code, Docker, CLIs, etc.) to configure each one.
-- The software is **ad-hoc signed but not notarized** (no paid Apple Developer / code-signing certificate — see below), so SmartScreen will show an "unknown publisher" warning and macOS Gatekeeper will show an "unidentified developer" prompt.
+- The macOS app is **ad-hoc signed but not notarized** (no paid Apple Developer / code-signing certificate — see below). Windows builds are still unsigned, so SmartScreen may show an "unknown publisher" warning; macOS Gatekeeper will show an "unidentified developer" prompt.
 
 These behaviors are legitimate and core to the tool's purpose, but they resemble patterns that security software treats as suspicious. If the script or app is blocked:
 
