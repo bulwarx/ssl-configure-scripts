@@ -1,28 +1,89 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Configures or rolls back the Netskope SSL certificate bundle for developer tools.
 .DESCRIPTION
-    Set $rollback = $true (or any other pre-set parameter) at the top of the script
-    for unattended deployment. When parameters are empty the script falls back to
-    interactive prompts.
+    Requires PowerShell 7+ (pwsh) — run with `pwsh -File .\configure_tools_windows.ps1`.
+    Windows PowerShell 5.1 (powershell.exe) is not supported and throws errors partway
+    through the script.
+
+    Two ways to run unattended, for two different deployment situations:
+      - Named parameters (Intune Win32 apps, SCCM, BigFix — anything that lets you
+        supply a full command line): pwsh -File configure_tools_windows.ps1
+        -TenantName mytenant.eu.goskope.com -OrgKey your-org-key
+      - Edit the parameter defaults below (Intune "platform scripts" and similar
+        contexts that run a .ps1 with no arguments at all).
+    Either way, once TenantName+OrgKey (or CertBundle) resolve to a non-empty value,
+    every prompt this script would otherwise ask is skipped.
+
+    For MDM deployment at scale, prefer -CertBundle pointing at a pre-distributed
+    .pem (push the file alongside the script) over the tenant/orgkey download path
+    — it never needs the org key on the endpoint at all, and needs no network
+    access to Netskope.
 
     Normal mode  : downloads the cert bundle and configures every detected tool.
     Rollback mode: removes all Netskope SSL configuration from every detected tool
                    without touching or needing the cert bundle file.
+.PARAMETER TenantName
+    Full Netskope tenant name, e.g. mytenant.eu.goskope.com.
+.PARAMETER OrgKey
+    Netskope tenant org key, used to download the RootCA/SubCA certs.
+.PARAMETER CertBundle
+    Path to an existing .pem bundle to use instead of downloading — skips the
+    network entirely. Recommended for MDM/at-scale deployment; see DESCRIPTION.
+.PARAMETER CertName
+    Certificate bundle file name. Default: netskope-cert-bundle.pem
+.PARAMETER CertDir
+    Certificate bundle directory. Default: $env:USERPROFILE\netskope
+.PARAMETER Recreate
+    Force re-download/regeneration even if the bundle file already exists.
+.PARAMETER Rollback
+    Remove all Netskope SSL configuration from every detected tool instead of
+    configuring it.
+.PARAMETER NetskopeOnly
+    Use only the two Netskope certs (RootCA + SubCA), skipping the public
+    curl.se CA bundle that's included by default.
+.PARAMETER CreateReplay
+    Write configured_tools.ps1 (a replay script) without being asked.
+.EXAMPLE
+    pwsh -File .\configure_tools_windows.ps1 -CertBundle C:\netskope\bundle.pem
+.EXAMPLE
+    pwsh -File .\configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key
 #>
 
-# ─── Optional pre-set parameters (set to skip interactive prompts) ────────────
-$tenantName   = ""
-$orgKey       = ""
-$certName     = "netskope-cert-bundle.pem"
-$certDir      = ""      # leave empty to default to $env:USERPROFILE\netskope
-$certBundle   = ""      # set to an existing .pem path to skip the download entirely
-$recreateCert = $false
-$rollback     = $false  # set $true to undo all Netskope SSL configuration
-$netskopeOnly = $false  # set $true to use only the two Netskope certs, skipping the public curl.se CA bundle
+[CmdletBinding()]
+param(
+    [string]$TenantName   = "",
+    [string]$OrgKey       = "",
+    [string]$CertName     = "netskope-cert-bundle.pem",
+    [string]$CertDir      = "",     # leave empty to default to $env:USERPROFILE\netskope
+    [string]$CertBundle   = "",     # set to an existing .pem path to skip the download entirely
+    [switch]$Recreate,
+    [switch]$Rollback,
+    [switch]$NetskopeOnly,
+    [switch]$CreateReplay
+)
+
+# The rest of the script uses these lower-camelCase names throughout — alias
+# here so both invocation styles from the .DESCRIPTION above (named
+# parameters, or editing the param() defaults directly) work unchanged.
+$tenantName   = $TenantName
+$orgKey       = $OrgKey
+$certName     = $CertName
+$certDir      = $CertDir
+$certBundle   = $CertBundle
+$recreateCert = [bool]$Recreate
+$rollback     = [bool]$Rollback
+$netskopeOnly = [bool]$NetskopeOnly
+$createReplay = [bool]$CreateReplay
 
 $fullBundle = -not $netskopeOnly
+
+# Tenant + orgkey (download path) or an existing bundle path both mean this is
+# a silent/unattended run — no prompt should block it, even ones (existing
+# bundle / recreate / replay) that aren't directly about those two values.
+$silentRun = (-not [string]::IsNullOrWhiteSpace($certBundle)) -or
+             ((-not [string]::IsNullOrWhiteSpace($tenantName)) -and (-not [string]::IsNullOrWhiteSpace($orgKey)))
 
 # ─── TLS bypass for initial download (cert not trusted yet) ──────────────────
 
@@ -56,7 +117,6 @@ function Remove-PersistentEnvVar($name) {
 }
 
 $configuredToolsFile = Join-Path $PSScriptRoot 'configured_tools.ps1'
-$createReplay = $false
 
 function Add-Replay($line) {
     if ($createReplay) { Add-Content -Path $configuredToolsFile -Value $line }
@@ -559,8 +619,9 @@ Write-Host ''
 
 # ─── User inputs ──────────────────────────────────────────────────────────────
 
-# Prompt for an existing bundle if not pre-set and running interactively.
-if ([string]::IsNullOrWhiteSpace($certBundle)) {
+# Prompt for an existing bundle if not pre-set. Skipped entirely for a
+# silent/unattended run (tenant + orgkey already supplied).
+if ([string]::IsNullOrWhiteSpace($certBundle) -and -not $silentRun) {
     $useExisting = (Read-Host 'Use an existing certificate bundle instead of downloading? [y/N]') -ieq 'y'
     if ($useExisting) { $certBundle = Read-Host 'Path to existing .pem bundle' }
 }
@@ -634,6 +695,10 @@ if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
         Write-Warn "$certName already exists in $certDir."
         if ($recreateCert) {
             New-CertBundle; $certWasRecreated = $true
+        } elseif ($silentRun) {
+            # Silent/unattended run — don't block on a prompt. Set
+            # $recreateCert = $true to force regenerating an existing bundle.
+            Write-Log 'Keeping existing bundle ($recreateCert = $true to force regeneration).'
         } else {
             $rec = Read-Host 'Recreate Certificate Bundle? (y/N)'
             if ($rec -ieq 'y') { New-CertBundle; $certWasRecreated = $true }
@@ -643,7 +708,11 @@ if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
     }
 }
 
-$createReplay = (Read-Host 'Create replay script (configured_tools.ps1)? [y/N]') -ieq 'y'
+# Skipped for a silent/unattended run — set $createReplay = $true above to
+# get the replay script without being asked.
+if (-not $silentRun) {
+    $createReplay = (Read-Host 'Create replay script (configured_tools.ps1)? [y/N]') -ieq 'y'
+}
 if ($createReplay) {
     Set-Content -Path $configuredToolsFile -Value '# Netskope SSL configuration - replay script'
     Write-Ok "Replay script: $configuredToolsFile"
