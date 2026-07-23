@@ -82,6 +82,12 @@ jobs:
         working-directory: tauri-app/src-tauri/target/release/bundle/macos
         run: |
           app=$(ls -d *.app | head -1)
+          # Ad-hoc signed via tauri.conf.json's bundle.macOS.signingIdentity ("-").
+          # No paid Apple Developer cert needed — this only avoids the hard
+          # "app is damaged" error on Apple Silicon (which refuses to run any
+          # unsigned binary at all); it does NOT notarize the app, so Gatekeeper
+          # still shows an "unidentified developer" prompt for a downloaded copy.
+          codesign --verify --deep --strict --verbose=2 "$app"
           ditto -c -k --sequesterRsrc --keepParent "$app" "$GITHUB_WORKSPACE/tauri-app/src-tauri/ssl-configurator-macos.zip"
 
       - name: Upload artifacts

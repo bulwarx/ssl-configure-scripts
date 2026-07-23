@@ -68,18 +68,22 @@ These scripts and the GUI app may be flagged, blocked, or quarantined by antivir
 - **Fetches a certificate from a third party** (the Netskope tenant) and installs it into user and system trust stores.
 - **Modifies user and system environment variables** to point tools at the certificate bundle.
 - **Scans the system for installed applications** (Python, Java/JDK, VS Code, Docker, CLIs, etc.) to configure each one.
-- The software is **not code-signed or notarized** (currently, and possibly going forward), so SmartScreen will show an "unknown publisher" warning and macOS Gatekeeper will refuse to open it.
+- The software is **ad-hoc signed but not notarized** (no paid Apple Developer / code-signing certificate — see below), so SmartScreen will show an "unknown publisher" warning and macOS Gatekeeper will show an "unidentified developer" prompt.
 
 These behaviors are legitimate and core to the tool's purpose, but they resemble patterns that security software treats as suspicious. If the script or app is blocked:
 
 - On Windows SmartScreen, click **More info → Run anyway**.
 - Allow / unblock the file in your antivirus or endpoint protection, or add an exclusion for it.
 - For the PowerShell script you may need to allow execution: `powershell -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1`.
-- On macOS, opening the GUI app's `.dmg`/`.app` for the first time may show **"'SSL Configurator' is damaged and can't be opened. You should move it to the Trash."** This isn't real corruption — it's Gatekeeper's response to an app that isn't notarized, combined with the quarantine flag macOS attaches to anything downloaded from a browser. Remove the quarantine flag and it opens normally:
+- On macOS, opening the GUI app's `.dmg`/`.app` for the first time shows **"Apple could not verify 'SSL Configurator' is free of malware"** (an unidentified-developer warning, not real corruption). Either:
+  - Right-click (or Control-click) the app → **Open** → **Open** again in the dialog — no Terminal needed, works on most macOS versions, or
+  - Remove the quarantine flag from Terminal:
 
-  ```sh
-  xattr -cr "/path/to/SSL Configurator.app"
-  ```
+    ```sh
+    xattr -cr "/path/to/SSL Configurator.app"
+    ```
+
+  The app is ad-hoc signed (no cost, no Apple Developer account), which is enough to satisfy Apple Silicon's requirement that every binary be signed — without it, macOS would refuse to run the app at all with a hard **"is damaged and can't be opened"** error instead of the milder prompt above. Ad-hoc signing alone doesn't clear Gatekeeper's quarantine check; only Apple notarization (a paid Developer Program enrollment) does that.
 
 Only run these tools from a source you trust, and review the contents before executing.
 
