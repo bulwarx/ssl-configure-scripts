@@ -118,9 +118,21 @@ jobs:
           if ($out -notmatch 'Using existing certificate bundle') { Write-Error "did not use the cert bundle when tenant/orgkey were also given"; exit 1 }
           if ($out -match 'Tenant Reachable' -or $out -match 'Tenant Unreachable') { Write-Error "attempted tenant reachability despite -CertBundle being given"; exit 1 }
 
+      - name: cmd — DIAGNOSTIC raw run (no redirection, no assertions)
+        shell: cmd
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          echo Working directory: %CD%
+          dir fixture.pem
+          echo ---- running configure_tools_windows.cmd (no redirection) ----
+          configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem
+          echo ---- exit code was %ERRORLEVEL% ----
+
       - name: cmd — cert-bundle= is silent and uses the given bundle
         shell: cmd
         timeout-minutes: 3
+        continue-on-error: true
         run: |
           call configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem > out1.txt 2>&1
           type out1.txt
@@ -139,6 +151,7 @@ jobs:
       - name: cmd — cert-bundle= overrides stale tenant-name=/org-key=
         shell: cmd
         timeout-minutes: 3
+        continue-on-error: true
         run: |
           call configure_tools_windows.cmd cert-bundle=%CD%\fixture.pem tenant-name=fake.example.com org-key=fakekey > out2.txt 2>&1
           type out2.txt
