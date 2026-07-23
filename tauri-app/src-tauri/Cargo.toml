@@ -1,6 +1,6 @@
 [package]
 name = "ssl-configurator"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 
 [lib]
@@ -18,10 +18,10 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-which = "6"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+which = "8"
 regex = "1"
-dirs = "5"
+dirs = "6"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
+winreg = "0.56"

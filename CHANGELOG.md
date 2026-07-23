@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-07-23
+
+### Fixed
+- **Tauri app couldn't see Homebrew-installed tools (npm, pnpm, az, etc.)** — a GUI app launched from Finder/Dock gets a minimal `PATH` from launchd (just `/usr/bin:/bin:/usr/sbin:/sbin`), which omits `/opt/homebrew/bin`. The app now asks the user's login shell for its real `PATH` at startup (falling back to appending common tool directories) and applies it process-wide, fixing both detection and the actual configuration commands. The mac/Linux scripts got the same defensive `PATH` augmentation in case they're run outside an interactive login shell.
+- **macOS sidebar footer showed "MacIntel" on Apple Silicon** — that came from `navigator.platform`, which WebKit hardcodes to "MacIntel" for every Mac regardless of real CPU architecture (intentional web-compat behavior, not a bug in your hardware). The footer now uses a new Rust `platform_info` command that reports the actual compiled-for OS/arch, e.g. "macOS (Apple Silicon)".
+- **`mkdir -p $certDir` was unquoted** in `configure_tools_mac.sh` / `configure_tools_linux.sh` — a `--cert-dir` path containing spaces would be split into multiple arguments and fail to create the directory. Same issue existed in every `post_command` string (gcloud/npm/composer/yarn/pnpm config calls) built with an unquoted `$certDir/$certName` and passed through `eval` — all now quoted. (Found via GitHub Copilot's review on the v0.3.0 PR.)
+- **Stale `netskope_only.pem` sidecar** — the sidecar is only written in full-bundle mode; switching to `--netskope-only` on a machine that previously ran full-bundle left the old sidecar in place with no indication it was stale. All scripts (bash, cmd, PowerShell, Python) now remove it when running in `--netskope-only` mode. (Also found via the Copilot review; the sidecar's explanatory comment was also fixed — it's for connections *always* intercepted by the proxy, not ones that bypass it.)
+- **The `pnpm`/adjacent tool config commands in `configure_tools_windows.cmd` and `universal_configure_tools.py` were also unquoted** (`cmd.exe`'s `%certDir%\%certName%` and Python's `shell=True` post-command strings) — same space-in-path breakage as the bash fix above, caught by a second Copilot pass on this PR.
+- **PATH-fix fallback could add an empty PATH entry** in both the Tauri app (Rust) and `universal_configure_tools.py` if `PATH` was unset/empty when prepending fallback directories — an empty PATH segment means "search the current working directory for executables", a real (if narrow) security footgun. Both now avoid producing that trailing/leading empty segment.
+- **Tauri app's Refresh button could wrongly uncheck newly-installed tools** — it restored prior deselections by unchecking anything not previously selected, which also caught tools that had just become installed (and were never selectable before). Now only restores deselection for tools that were already installed *and* explicitly unchecked before the refresh.
+
+### Added
+- **pnpm support** across every script and the Tauri app — it wasn't a detection bug, pnpm was never in the tool list at all. Configured via the same `cafile` key npm uses.
+- **Refresh button** on the Tauri app's Select Tools step — re-runs detection without restarting the app (e.g. after installing a tool mid-session), preserving any tool you'd manually unchecked.
+
+### Changed
+- Upgraded all Cargo dependencies to their latest versions, including major bumps: `reqwest` 0.12 → 0.13 (its `rustls-tls` feature was renamed to `rustls`), `which` 6 → 8, `dirs` 5 → 6, `winreg` 0.52 → 0.56 (Windows-only). Plus `tauri` 2.11.2 → 2.11.5 and other transitive dependencies to their latest compatible patch versions.
+- Upgraded GitHub Actions: `actions/checkout` v6 → v7, `actions/cache` v5 → v6, `actions/setup-node` v6 → v7, `dependabot/fetch-metadata` v2 → v3.
+- Dependabot flagged an open `glib` advisory (unsound `Iterator` impls, fixed in 0.20.0) — not fixable today: `tauri` 2.11.x itself pins `gtk = "^0.18"`, which requires `glib ^0.18`. This is blocked on an upstream Tauri release moving to a newer gtk-rs generation; Dependabot will pick up the fix automatically once that lands (already configured for weekly cargo updates in this repo).
+
 ## [0.3.0] - 2026-07-22
 
 ### Changed

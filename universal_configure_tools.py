@@ -11,6 +11,39 @@ import shutil
 # Determine if the OS is Windows
 is_windows = platform.system() == "Windows"
 
+
+def _augment_path():
+    """Add common tool directories to PATH if missing.
+
+    Homebrew (/opt/homebrew/bin), Linuxbrew, and per-user installs like
+    ~/.cargo/bin or ~/Library/pnpm are only added to PATH by a shell profile
+    (.zprofile/.zshrc/.bashrc) — which a non-interactive/non-login shell (or
+    this script launched some other way) never sources, making tools that
+    live there invisible even though they're installed.
+    """
+    if is_windows:
+        return
+    home = os.path.expanduser('~')
+    candidates = [
+        '/opt/homebrew/bin', '/opt/homebrew/sbin',
+        '/usr/local/bin', '/usr/local/sbin',
+        '/home/linuxbrew/.linuxbrew/bin', '/home/linuxbrew/.linuxbrew/sbin',
+        os.path.join(home, '.cargo', 'bin'),
+        os.path.join(home, '.local', 'bin'),
+        os.path.join(home, 'Library', 'pnpm'),
+        os.path.join(home, '.local', 'share', 'pnpm'),
+    ]
+    current = os.environ.get('PATH', '')
+    existing = set(current.split(os.pathsep))
+    to_add = [d for d in candidates if os.path.isdir(d) and d not in existing]
+    if to_add:
+        # Drop any empty segment (e.g. from an unset/empty PATH) — an empty
+        # entry means "search the current directory", a real security risk.
+        os.environ['PATH'] = os.pathsep.join(p for p in (to_add + [current]) if p)
+
+
+_augment_path()
+
 # ─── ANSI color helpers ───────────────────────────────────────────────────────
 def _enable_ansi():
     """Enable VT/ANSI escape processing on Windows 10+."""
@@ -335,6 +368,18 @@ def rollback():
     if not yarn_found:
         dim('  yarn is not installed')
 
+    # --- pnpm ---
+    header('pnpm')
+    if command_exists('pnpm'):
+        r = subprocess.run(['pnpm', 'config', 'delete', 'cafile'],
+                           capture_output=True, text=True, shell=is_windows)
+        if r.returncode == 0:
+            ok('  pnpm cafile: deleted')
+        else:
+            warn('  pnpm: cafile not configured')
+    else:
+        dim('  pnpm is not installed')
+
     # --- Java ---
     header('Java')
     storepass = 'changeit'
@@ -601,6 +646,14 @@ else:
     if not os.path.isdir(cert_dir):
         warn(f'{cert_dir} does not exist — creating it')
         os.makedirs(cert_dir, exist_ok=True)
+
+    # Not maintained in --netskope-only mode — remove a stale sidecar left
+    # over from an earlier full-bundle run even if we end up keeping the
+    # existing main bundle below, so it's never mistaken for a fresh one.
+    if not full_bundle:
+        netskope_only_path = os.path.join(cert_dir, 'netskope_only.pem')
+        if os.path.exists(netskope_only_path):
+            os.remove(netskope_only_path)
 
     tenant_name = normalize_tenant(cli_tenant_name or input(
         'Please provide full tenant name (ex: mytenant.eu.goskope.com): '))
@@ -961,11 +1014,13 @@ tools = [
     ("OpenSSL", "SSL_CERT_FILE", "openssl", ""),
     ("cURL", "SSL_CERT_FILE", "curl", ""),
     ("AWS CLI", "AWS_CA_BUNDLE", "aws", ""),
-    ("Google Cloud CLI", None, "gcloud", f'gcloud config set core/custom_ca_certs_file {_cert_path}'),
-    ("NodeJS Package Manager (NPM)", None, "npm", f'npm config set cafile {_cert_path}'),
+    ("Google Cloud CLI", None, "gcloud", f'gcloud config set core/custom_ca_certs_file "{_cert_path}"'),
+    ("NodeJS Package Manager (NPM)", None, "npm", f'npm config set cafile "{_cert_path}"'),
+    # pnpm reads the same npm-compatible "cafile" config key.
+    ("pnpm", None, "pnpm", f'pnpm config set cafile "{_cert_path}"'),
     ("NodeJS", "NODE_EXTRA_CA_CERTS", "node", ""),
     ("Ruby", "SSL_CERT_FILE", "ruby", ""),
-    ("PHP Composer", None, "composer", f'composer config --global cafile {_cert_path}'),
+    ("PHP Composer", None, "composer", f'composer config --global cafile "{_cert_path}"'),
     ("GoLang", "SSL_CERT_FILE", "go", ""),
     ("Azure CLI", "REQUESTS_CA_BUNDLE", "az", ""),
     ("Oracle Cloud CLI", "REQUESTS_CA_BUNDLE", "oci", ""),
@@ -977,7 +1032,7 @@ tools = [
 # because a conflicting "yarn" binary already exists there.
 _yarn_cmd = next((c for c in ('yarn', 'yarnpkg') if command_exists(c)), None)
 if _yarn_cmd:
-    tools.append(("Yarn", None, _yarn_cmd, f'{_yarn_cmd} config set httpsCaFilePath {_cert_path}'))
+    tools.append(("Yarn", None, _yarn_cmd, f'{_yarn_cmd} config set httpsCaFilePath "{_cert_path}"'))
 else:
     tools.append(("Yarn", None, "yarn", ""))
 

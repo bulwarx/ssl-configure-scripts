@@ -279,6 +279,43 @@ async function loadTools() {
   }
 }
 
+// Re-runs detection (e.g. after installing a tool without restarting the
+// app) while preserving any tool the user had explicitly unchecked.
+async function refreshTools() {
+  const btn = document.getElementById('btn-refresh-tools');
+  const hadRows = document.querySelectorAll('#step-4 .tool-row').length > 0;
+  const previouslyOn = new Set(getSelectedToolIds());
+  // Only a tool that was already installed (and thus could have been
+  // deselected) counts as an explicit deselection below — a tool that just
+  // became installed was never "on" before but should default to checked,
+  // same as a first load, not get force-unchecked.
+  const previouslyInstalled = new Set(detectedTools.filter(t => t.installed).map(t => t.id));
+
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = '⟳ Refreshing…';
+  try {
+    await loadTools();
+    if (hadRows) {
+      // renderTools() defaults every installed tool back to checked —
+      // restore explicit deselections from before the refresh.
+      document.querySelectorAll('#step-4 .tool-row').forEach(row => {
+        const id = row.dataset.id;
+        if (!row.classList.contains('disabled') && previouslyInstalled.has(id) && !previouslyOn.has(id)) {
+          const cb = row.querySelector('.cb');
+          row.classList.remove('on');
+          cb.classList.remove('on');
+          cb.textContent = '';
+        }
+      });
+      updateCount();
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
 function renderTools(tools) {
   const groups = {};
   for (const t of tools) {
@@ -480,6 +517,7 @@ function mockInvoke(cmd, args) {
     { id:'npm',      name:'NPM / Node.js',    group:'Package Managers', installed:true,  version:'10.8.0', path:'/usr/bin/npm' },
     { id:'python',   name:'Python / pip',     group:'Package Managers', installed:true,  version:'Python 3.12.4', path:'/usr/bin/python3' },
     { id:'yarn',     name:'Yarn',             group:'Package Managers', installed:false, version:null, path:null },
+    { id:'pnpm',     name:'pnpm',             group:'Package Managers', installed:false, version:null, path:null },
     { id:'aws',      name:'AWS CLI',          group:'Cloud CLIs', installed:true,  version:'aws-cli/2.17.0', path:'/usr/local/bin/aws' },
     { id:'gcloud',   name:'Google Cloud CLI', group:'Cloud CLIs', installed:false, version:null, path:null },
     { id:'az',       name:'Azure CLI',        group:'Cloud CLIs', installed:true,  version:'2.62.0', path:'/usr/bin/az' },
@@ -519,17 +557,24 @@ function mockInvoke(cmd, args) {
     return Promise.resolve([]);
   }
   if (cmd === 'generate_replay_script') return Promise.resolve('@echo off\necho Mock replay script\n');
+  if (cmd === 'platform_info') return Promise.resolve('macOS (Apple Silicon) [mock]');
   return Promise.resolve(null);
 }
 
 // ── Init ──────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
-  // Detect platform info for sidebar footer
-  const platform = inTauriApp()
-    ? (navigator.userAgent.includes('Windows') ? 'Windows' : navigator.platform)
-    : navigator.platform;
-  document.getElementById('sb-footer').textContent = `v0.3.0 · ${platform}`;
+  // Detect platform info for sidebar footer. navigator.platform is NOT used
+  // here — WebKit reports "MacIntel" for every Mac regardless of actual CPU
+  // architecture, so Apple Silicon machines showed as Intel. The Rust
+  // backend reports the real compiled-for OS/arch instead.
+  let platform = navigator.platform;
+  try {
+    platform = await invoke('platform_info', {});
+  } catch (e) {
+    console.warn('platform_info failed:', e);
+  }
+  document.getElementById('sb-footer').textContent = `v0.4.0 · ${platform}`;
 
   render();
 

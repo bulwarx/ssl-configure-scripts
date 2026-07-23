@@ -400,6 +400,13 @@ function Invoke-Rollback {
         Write-Ok "  cafile removed"
     } else { Write-Dim "  not installed" }
 
+    # pnpm
+    Write-Header "pnpm"
+    if (Test-Cmd 'pnpm') {
+        pnpm config delete cafile 2>$null
+        Write-Ok "  cafile removed"
+    } else { Write-Dim "  not installed" }
+
     # Python
     Write-Header "Python installations"
     $allPythons = @(Get-AllPythons)
@@ -604,6 +611,14 @@ if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
         New-Item -ItemType Directory -Path $certDir -Force | Out-Null
     }
 
+    # Not maintained in --netskope-only mode — remove a stale sidecar left
+    # over from an earlier full-bundle run even if we end up keeping the
+    # existing main bundle below, so it's never mistaken for a fresh one.
+    if (-not $fullBundle) {
+        $staleNetskopeOnly = Join-Path $certDir 'netskope_only.pem'
+        if (Test-Path $staleNetskopeOnly) { Remove-Item $staleNetskopeOnly -Force }
+    }
+
     # Tenant reachability
     try {
         Invoke-WebRequest -Uri "https://$tenantName/locallogin" -UseBasicParsing @skipTls `
@@ -756,6 +771,14 @@ if (Test-Cmd 'yarn') {
     Write-Ok "Yarn configured"
     Add-Replay "yarn config set cafile `"$certPath`""
 } else { Write-Dim "Yarn is not installed" }
+
+Write-Host ""
+if (Test-Cmd 'pnpm') {
+    Write-Host "pnpm is installed"; pnpm --version
+    pnpm config set cafile $certPath
+    Write-Ok "pnpm configured"
+    Add-Replay "pnpm config set cafile `"$certPath`""
+} else { Write-Dim "pnpm is not installed" }
 
 Write-Host ""
 $storageExplorerCerts = Join-Path $env:APPDATA 'StorageExplorer\certs'
