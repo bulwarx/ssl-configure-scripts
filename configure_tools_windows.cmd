@@ -19,18 +19,40 @@ if /i "%~1"=="rollback" goto :do_rollback
 set fullBundle=1
 for %%a in (%*) do if /i "%%a"=="netskope-only" set fullBundle=0
 
-:: Optionally use an existing bundle instead of downloading
+:: Parse named unattended-deployment flags: tenant-name=, org-key=,
+:: cert-name=, cert-dir=, cert-bundle=, recreate, create-replay. Any of
+:: these let this run skip the interactive prompt(s) they cover.
+set "tenantName="
+set "orgKey="
+set "certName="
+set "certDir="
 set "certBundle="
-set /p useExisting="Use an existing certificate bundle instead of downloading? [y/N]: "
-if /i "%useExisting%"=="y" set /p certBundle="Path to existing .pem bundle: "
+set recreateFlag=0
+set createReplayFlag=0
+for %%a in (%*) do call :parse_arg "%%a"
+
+:: Tenant + orgkey (download path) or an existing bundle path both mean this
+:: is a silent/unattended run — no prompt below should block it, even ones
+:: (existing bundle / recreate / replay) that aren't directly about those
+:: two values.
+set silentRun=0
+if defined certBundle set silentRun=1
+if defined tenantName if defined orgKey set silentRun=1
+
+:: Optionally use an existing bundle instead of downloading. Skipped
+:: entirely for a silent/unattended run.
+if not defined certBundle if "%silentRun%"=="0" (
+    set /p useExisting="Use an existing certificate bundle instead of downloading? [y/N]: "
+    if /i "%useExisting%"=="y" set /p certBundle="Path to existing .pem bundle: "
+)
 if defined certBundle goto :use_existing
 
 :: Set Certificate bundle name and location
-set /p certName="Please provide certificate bundle name [netskope-cert-bundle.pem]:"
-if "%certName%"=="" set certName=netskope-cert-bundle.pem
+if not defined certName if "%silentRun%"=="0" set /p certName="Please provide certificate bundle name [netskope-cert-bundle.pem]:"
+if not defined certName set certName=netskope-cert-bundle.pem
 
-set /p certDir="Please provide certificate bundle location [C:\netskope]:"
-if "%certDir%"=="" set certDir=C:\netskope
+if not defined certDir if "%silentRun%"=="0" set /p certDir="Please provide certificate bundle location [C:\netskope]:"
+if not defined certDir set certDir=C:\netskope
 
 if not exist "%certDir%" (
     echo %RED%%certDir% does not exist.%RST%
@@ -44,8 +66,8 @@ if not exist "%certDir%" (
 if "%fullBundle%"=="0" if exist "%certDir%\netskope_only.pem" del /f /q "%certDir%\netskope_only.pem" >NUL 2>&1
 
 :: Get tenant information to create certificate bundle
-set /p tenantName="Please provide full tenant name (ex: mytenant.eu.goskope.com):"
-set /p orgKey="Please provide tenant orgkey:"
+if not defined tenantName if "%silentRun%"=="0" set /p tenantName="Please provide full tenant name (ex: mytenant.eu.goskope.com):"
+if not defined orgKey if "%silentRun%"=="0" set /p orgKey="Please provide tenant orgkey:"
 
 :: Strip an https:// or http:// prefix if the user pasted a full URL — otherwise
 :: the addon-%tenantName% splice below produces a malformed URL.
@@ -70,7 +92,13 @@ set certWasRecreated=0
 set recreate=n
 if exist "%certDir%\%certName%" (
     echo %YLW%%certName% already exists in %certDir%.%RST%
-    set /p recreate="Recreate Certificate Bundle? (y/n): "
+    if "%recreateFlag%"=="1" (
+        set recreate=y
+    ) else if "%silentRun%"=="1" (
+        echo %GRY%Keeping existing bundle ^(pass recreate to force regeneration^).%RST%
+    ) else (
+        set /p recreate="Recreate Certificate Bundle? (y/n): "
+    )
 ) else (
     set recreate=y
 )
@@ -152,9 +180,14 @@ echo %GRN%Using existing certificate bundle: %certBundle%%RST%
 
 :after_bundle
 
-:: Ask whether to create a replay script
+:: Ask whether to create a replay script. Skipped for a silent/unattended
+:: run — pass create-replay to get it without being asked.
 set createReplay=n
-set /p createReplay="Create replay script (configured_tools.bat)? [y/N]: "
+if "%silentRun%"=="0" (
+    set /p createReplay="Create replay script (configured_tools.bat)? [y/N]: "
+) else if "%createReplayFlag%"=="1" (
+    set createReplay=y
+)
 if /i "%createReplay%"=="y" (
     echo @echo off > "%~dp0configured_tools.bat"
     echo %GRN%Replay script: %~dp0configured_tools.bat%RST%
@@ -519,6 +552,25 @@ echo %GRN%Rollback complete.%RST%
 goto :eof
 
 :: ─── Helpers ──────────────────────────────────────────────────────────────────
+
+:: Parses one "key=value" or bare-flag argument for unattended deployment:
+:: tenant-name=, org-key=, cert-dir=, cert-name=, cert-bundle=, recreate,
+:: create-replay. Called once per %* argument from the top of the script.
+:parse_arg
+set "arg=%~1"
+set "prefix=%arg:~0,12%"
+if /i "%prefix%"=="tenant-name=" set "tenantName=%arg:~12%"
+set "prefix=%arg:~0,8%"
+if /i "%prefix%"=="org-key=" set "orgKey=%arg:~8%"
+set "prefix=%arg:~0,9%"
+if /i "%prefix%"=="cert-dir=" set "certDir=%arg:~9%"
+set "prefix=%arg:~0,10%"
+if /i "%prefix%"=="cert-name=" set "certName=%arg:~10%"
+set "prefix=%arg:~0,12%"
+if /i "%prefix%"=="cert-bundle=" set "certBundle=%arg:~12%"
+if /i "%arg%"=="recreate" set recreateFlag=1
+if /i "%arg%"=="create-replay" set createReplayFlag=1
+exit /b 0
 
 :: Function to check if a command exists
 :command_exists

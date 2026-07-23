@@ -23,7 +23,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 | `configure_tools_linux.sh` | Linux | Shell script |
 | `configure_tools_mac.sh` | macOS | Shell script |
 | `configure_tools_windows.cmd` | Windows | CMD script with ANSI color output |
-| `configure_tools_windows.ps1` | Windows | PowerShell script — most comprehensive |
+| `configure_tools_windows.ps1` | Windows | PowerShell script — most comprehensive. **Requires PowerShell 7+ (`pwsh`)**, not Windows PowerShell 5.1 |
 | `universal_configure_tools.py` | All platforms | Python — unified cross-platform coverage |
 
 ## Supported Tools
@@ -56,6 +56,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 ## Requirements
 - Python 3 (for the universal script; platform-specific scripts are standalone)
 - OpenSSL CLI (for cert parsing; bundled with Windows scripts)
+- **PowerShell 7+ (`pwsh`) for `configure_tools_windows.ps1`** — Windows PowerShell 5.1 (the version built into Windows, `powershell.exe`) throws errors partway through the script and is not supported. Install PowerShell 7 from [aka.ms/powershell](https://aka.ms/powershell) (or `winget install Microsoft.PowerShell`) and run the script with `pwsh -File .\configure_tools_windows.ps1`, not `powershell -File ...`.
 
 ```
 pip install -r requirements.txt  # install dependencies for the Python script
@@ -68,18 +69,22 @@ These scripts and the GUI app may be flagged, blocked, or quarantined by antivir
 - **Fetches a certificate from a third party** (the Netskope tenant) and installs it into user and system trust stores.
 - **Modifies user and system environment variables** to point tools at the certificate bundle.
 - **Scans the system for installed applications** (Python, Java/JDK, VS Code, Docker, CLIs, etc.) to configure each one.
-- The software is **not code-signed or notarized** (currently, and possibly going forward), so SmartScreen will show an "unknown publisher" warning and macOS Gatekeeper will refuse to open it.
+- The macOS app is **ad-hoc signed but not notarized** (no paid Apple Developer / code-signing certificate — see below). Windows builds are still unsigned, so SmartScreen may show an "unknown publisher" warning; macOS Gatekeeper will show an "unidentified developer" prompt.
 
 These behaviors are legitimate and core to the tool's purpose, but they resemble patterns that security software treats as suspicious. If the script or app is blocked:
 
 - On Windows SmartScreen, click **More info → Run anyway**.
 - Allow / unblock the file in your antivirus or endpoint protection, or add an exclusion for it.
-- For the PowerShell script you may need to allow execution: `powershell -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1`.
-- On macOS, opening the GUI app's `.dmg`/`.app` for the first time may show **"'SSL Configurator' is damaged and can't be opened. You should move it to the Trash."** This isn't real corruption — it's Gatekeeper's response to an app that isn't notarized, combined with the quarantine flag macOS attaches to anything downloaded from a browser. Remove the quarantine flag and it opens normally:
+- For the PowerShell script you may need to allow execution: `pwsh -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1` (requires PowerShell 7+ — see Requirements above).
+- On macOS, opening the GUI app's `.dmg`/`.app` for the first time shows **"Apple could not verify 'SSL Configurator' is free of malware"** (an unidentified-developer warning, not real corruption). Either:
+  - Right-click (or Control-click) the app → **Open** → **Open** again in the dialog — no Terminal needed, works on most macOS versions, or
+  - Remove the quarantine flag from Terminal:
 
-  ```sh
-  xattr -cr "/path/to/SSL Configurator.app"
-  ```
+    ```sh
+    xattr -cr "/path/to/SSL Configurator.app"
+    ```
+
+  The app is ad-hoc signed (no cost, no Apple Developer account), which is enough to satisfy Apple Silicon's requirement that every binary be signed — without it, macOS would refuse to run the app at all with a hard **"is damaged and can't be opened"** error instead of the milder prompt above. Ad-hoc signing alone doesn't clear Gatekeeper's quarantine check; only Apple notarization (a paid Developer Program enrollment) does that.
 
 Only run these tools from a source you trust, and review the contents before executing.
 
@@ -98,8 +103,8 @@ Run one script for your platform, it is recommended to use the *Universal_config
 # Windows CMD
 configure_tools_windows.cmd
 
-# Windows PowerShell
-./configure_tools_windows.ps1
+# Windows PowerShell (requires PowerShell 7+ / pwsh — see Requirements)
+pwsh -File .\configure_tools_windows.ps1
 
 # Any platform (Python 3)
 python universal_configure_tools.py
@@ -162,7 +167,7 @@ Every script supports a rollback mode that removes all Netskope SSL configuratio
 configure_tools_windows.cmd rollback
 
 # Windows PowerShell — set $rollback = $true at the top of the file
-./configure_tools_windows.ps1
+pwsh -File .\configure_tools_windows.ps1
 
 # Any platform (Python 3)
 python universal_configure_tools.py --rollback
@@ -172,13 +177,20 @@ Rollback reverses: environment variables, Git, cURL `.curlrc`, gcloud, npm, Comp
 
 ## Silent / Automated Deployment
 
-### Linux / macOS / Python
+Every script follows the same rule: once the tenant name + org key (or an existing cert bundle path) resolve to a non-empty value — from a flag/parameter, or a hardcoded default — **every** prompt is skipped, not just the ones that ask for those two values directly. That includes "use an existing bundle?", "recreate certificate bundle?", and "create replay script?".
 
-Pass the tenant details as flags and the script runs with zero prompts — this is the supported path for software distributors pushing the script unattended:
+### Recommended for MDM / at-scale deployment: distribute an existing bundle
+
+If you're pushing this via Intune, Jamf, SCCM, or BigFix to machines, prefer `--cert-bundle` (or `-CertBundle` / `cert-bundle=`) over the tenant+org-key download path.
+Using a certificate file bundled with the script prevents saving the Org-key into the script or end-user machines or logs in MDM.
+
+Have your security team download the bundle interactively once, ship the `.pem` as a package resource / attached file alongside the script, and point every script at it.
+
+### Command-line flags / parameters (bash, Python, CMD)
 
 ```sh
 # Linux / macOS
-./configure_tools_linux.sh --tenant-name mytenant.eu.goskope.com --org-key your-org-key
+./configure_tools_linux.sh --cert-bundle /path/to/bundle.pem
 ./configure_tools_mac.sh   --tenant-name mytenant.eu.goskope.com --org-key your-org-key
 
 # Optional: --cert-name, --cert-dir, --recreate (force re-download if the bundle already exists)
@@ -186,26 +198,53 @@ Pass the tenant details as flags and the script runs with zero prompts — this 
   --cert-name netskope-cert-bundle.pem --cert-dir ~/netskope --recreate
 
 # Python
-python universal_configure_tools.py --tenant-name mytenant.eu.goskope.com --org-key your-org-key
-```
+python universal_configure_tools.py --cert-bundle /path/to/bundle.pem
 
-Passing `--cert-bundle` (an existing bundle) is silent by the same rule and, unlike the download path, never touches the network at all — the file is validated locally and used in place.
+# Windows CMD (bare key=value flags, no leading dashes; also: recreate, create-replay, netskope-only, rollback)
+configure_tools_windows.cmd cert-bundle=C:\netskope\bundle.pem
+configure_tools_windows.cmd tenant-name=mytenant.eu.goskope.com org-key=your-org-key
+```
 
 ### Windows PowerShell
 
-The PowerShell script supports pre-set parameters at the top of the file for fully unattended deployment. Edit the parameter block before running:
+Requires PowerShell 7+ (`pwsh`) — see Requirements above. Two ways to run unattended, for two different deployment situations:
 
 ```powershell
-$tenantName   = "mytenant.eu.goskope.com"
-$orgKey       = "your-org-key"
-$certName     = "netskope-cert-bundle.pem"
-$certDir      = "C:\Users\username\netskope\"
-$recreateCert = $false   # set $true to force re-download on every run
-$rollback     = $false   # set $true to undo all Netskope SSL configuration
-$netskopeOnly = $false   # set $true to skip the public curl.se CA bundle (Netskope certs only)
+# Named parameters — for anything that lets you supply a full command line
+# (Intune Win32 apps, SCCM, BigFix):
+pwsh -File configure_tools_windows.ps1 -CertBundle C:\netskope\bundle.pem
+pwsh -File configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key -CertName netskope-cert-bundle.pem -CertDir C:\netskope\bundle -Recreate
 ```
 
-When all parameters are set the script runs without any interactive prompts.
+```powershell
+# Or edit the parameter defaults directly in the file — for contexts that run
+# a .ps1 with no arguments at all (e.g. Intune "platform scripts"):
+param(
+    [string]$TenantName   = "mytenant.eu.goskope.com",
+    [string]$OrgKey       = "your-org-key",
+    [string]$CertName     = "netskope-cert-bundle.pem",
+    [string]$CertDir      = "C:\Users\username\netskope\",
+    [string]$CertBundle   = "",     # set to an existing .pem path to skip the download entirely
+    [switch]$Recreate,              # force re-download on every run
+    [switch]$Rollback,              # undo all Netskope SSL configuration
+    [switch]$NetskopeOnly,          # skip the public curl.se CA bundle (Netskope certs only)
+    [switch]$CreateReplay           # write configured_tools.ps1 without being asked
+)
+```
+
+Run `Get-Help .\configure_tools_windows.ps1 -Full` for parameter descriptions and examples.
+
+### Deploying via a specific MDM/RMM tool
+
+| Tool | How parameters reach the script | Example |
+|---|---|---|
+| **Intune** — Win32 app | Full "Install command" string, named params work directly | `pwsh -File configure_tools_windows.ps1 -CertBundle "%ProgramData%\netskope\bundle.pem"` |
+| **Intune** — platform script | No arguments possible at all | Edit the `.ps1` parameter defaults before uploading (the bash/Python scripts don't have an equivalent editable-defaults block today — they need at least one flag) |
+| **Jamf Pro** | Only positional `$4`–`$11` script parameters, no named flags | Ship a 1-line wrapper the policy calls instead of contorting the script: `configure_tools_mac.sh --tenant-name "$4" --org-key "$5"` (or `--cert-bundle "$4"` for the recommended path). Consider Jamf's parameter-encryption convention (community.jamf.com) if passing an org key this way. |
+| **SCCM/ConfigMgr** | Full command line (Installation program field) | Same as any silent installer — put the flags directly in the command line |
+| **BigFix** | Parameters embedded directly in the Fixlet action script | Bake the flags into the action script text |
+
+Across every tool, the safest option against policy-log/process-list exposure is still `--cert-bundle` — it needs no secret in the command line at all.
 
 ## Replay Script
 
@@ -237,3 +276,4 @@ Enhanced by the Bulwarx Ltd team:
 - Replay script support
 - Rollback support across all scripts
 - Full bundle by default (Netskope RootCA + SubCA, correct chain order, plus public CA roots); optional Netskope-only bundle via `--netskope-only`
+- Automated Silent install options for MDM
