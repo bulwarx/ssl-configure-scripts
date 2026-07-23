@@ -38,6 +38,11 @@ if not exist "%certDir%" (
     mkdir "%certDir%"
 )
 
+:: Not maintained in netskope-only mode — remove a stale sidecar left over
+:: from an earlier full-bundle run even if we end up keeping the existing
+:: main bundle below, so it's never mistaken for a freshly generated one.
+if "%fullBundle%"=="0" if exist "%certDir%\netskope_only.pem" del /f /q "%certDir%\netskope_only.pem" >NUL 2>&1
+
 :: Get tenant information to create certificate bundle
 set /p tenantName="Please provide full tenant name (ex: mytenant.eu.goskope.com):"
 set /p orgKey="Please provide tenant orgkey:"
@@ -303,6 +308,18 @@ if %ERRORLEVEL% EQU 0 (
     echo %GRY%Yarn is not installed%RST%
 )
 
+echo.
+call :command_exists pnpm
+if %ERRORLEVEL% EQU 0 (
+    echo %GRN%pnpm is installed%RST%
+    pnpm --version
+    pnpm config set cafile %certDir%\%certName%
+    echo %GRN%pnpm configured%RST%
+    if /i "%createReplay%"=="y" echo pnpm config set cafile %certDir%\%certName% >> configured_tools.bat
+) else (
+    echo %GRY%pnpm is not installed%RST%
+)
+
 :: Java JDK
 echo.
 echo %CYN%Java installations:%RST%
@@ -459,6 +476,17 @@ if %ERRORLEVEL% EQU 0 (
     ) else (
         echo   %GRY%yarn is not installed%RST%
     )
+)
+
+:: pnpm
+echo.
+echo %CYN%--- pnpm ---%RST%
+where pnpm >NUL 2>&1
+if %ERRORLEVEL% EQU 0 (
+    pnpm config delete cafile >NUL 2>&1
+    echo   %GRN%pnpm: cafile config removed%RST%
+) else (
+    echo   %GRY%pnpm is not installed%RST%
 )
 
 :: Java keytool

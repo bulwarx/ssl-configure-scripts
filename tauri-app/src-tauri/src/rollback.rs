@@ -57,6 +57,7 @@ async fn rollback_one(id: &str) -> ToolResult {
         "curl" => rollback_curl(),
         "npm" => rollback_npm(),
         "yarn" => rollback_yarn(),
+        "pnpm" => rollback_pnpm(),
         "aws" => rollback_aws(),
         "gcloud" => rollback_gcloud(),
         "az" => rollback_az(),
@@ -158,6 +159,14 @@ fn rollback_yarn() -> ToolResult {
         "yarn", "Yarn", "yarn",
         &["config", "delete", "cafile"],
         "yarn cafile deleted",
+    )
+}
+
+fn rollback_pnpm() -> ToolResult {
+    run_or_skip(
+        "pnpm", "pnpm", "pnpm",
+        &["config", "delete", "cafile"],
+        "pnpm cafile deleted",
     )
 }
 

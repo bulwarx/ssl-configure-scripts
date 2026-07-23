@@ -66,6 +66,7 @@ pub fn detect_tools() -> Vec<ToolStatus> {
         detect_cmd("npm", "NPM / Node.js", "Package Managers"),
         detect_python(),
         detect_cmd("yarn", "Yarn", "Package Managers"),
+        detect_cmd("pnpm", "pnpm", "Package Managers"),
         // Cloud CLIs
         detect_cmd("aws", "AWS CLI", "Cloud CLIs"),
         detect_cmd("gcloud", "Google Cloud CLI", "Cloud CLIs"),
@@ -180,6 +181,7 @@ async fn configure_one(id: &str, bundle_path: &str) -> ToolResult {
         "curl" => configure_curl(bundle_path),
         "npm" => configure_npm(bundle_path),
         "yarn" => configure_yarn(bundle_path),
+        "pnpm" => configure_pnpm(bundle_path),
         "aws" => configure_aws(bundle_path),
         "gcloud" => configure_gcloud(bundle_path),
         "az" => configure_az(bundle_path),
@@ -348,6 +350,27 @@ pub fn configure_yarn(bundle_path: &str) -> ToolResult {
         Err(e) => ToolResult {
             id: "yarn".into(),
             name: "Yarn".into(),
+            ok: false,
+            message: e,
+            command: None,
+        },
+    }
+}
+
+pub fn configure_pnpm(bundle_path: &str) -> ToolResult {
+    // pnpm reads the same npm-compatible "cafile" config key.
+    let cmd = format!("pnpm config set cafile \"{}\"", bundle_path);
+    match run_cmd("pnpm", &["config", "set", "cafile", bundle_path]) {
+        Ok(_) => ToolResult {
+            id: "pnpm".into(),
+            name: "pnpm".into(),
+            ok: true,
+            message: "pnpm cafile configured".into(),
+            command: Some(cmd),
+        },
+        Err(e) => ToolResult {
+            id: "pnpm".into(),
+            name: "pnpm".into(),
             ok: false,
             message: e,
             command: None,

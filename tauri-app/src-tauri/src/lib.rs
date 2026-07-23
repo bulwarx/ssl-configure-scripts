@@ -22,6 +22,7 @@ fn prepare_webview_data_dir() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     prepare_webview_data_dir();
+    platform::fix_path_env();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -32,6 +33,7 @@ pub fn run() {
             cert::download_bundle,
             cert::use_existing_bundle,
             cert::default_bundle_dir,
+            cert::platform_info,
             tools::detect_tools,
             tools::configure_tools,
             rollback::rollback_tools,

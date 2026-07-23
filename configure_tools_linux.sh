@@ -1,6 +1,16 @@
 #!/bin/bash
 ## This tool will try to detect common cli tools and will configure the Netskope SSL certificate bundle.
 
+# Ensure common tool locations are on PATH even if this script isn't run from
+# an interactive login shell (e.g. Linuxbrew, nvm, or ~/.local/bin installs
+# that a profile file only adds to PATH for interactive/login shells).
+for extra_path in /home/linuxbrew/.linuxbrew/bin /home/linuxbrew/.linuxbrew/sbin \
+                  "$HOME/.cargo/bin" "$HOME/.local/bin" "$HOME/.local/share/pnpm"; do
+    if [ -d "$extra_path" ] && [[ ":$PATH:" != *":$extra_path:"* ]]; then
+        PATH="$extra_path:$PATH"
+    fi
+done
+
 # Check which shell environment is used (bash)
 get_shell() {
     my_shell=$(echo $SHELL)
@@ -100,6 +110,16 @@ rollback() {
     done
     if [ $yarn_found -eq 0 ]; then
         echo "  yarn is not installed"
+    fi
+
+    # pnpm
+    echo
+    echo "--- pnpm ---"
+    if command_exists pnpm; then
+        pnpm config delete cafile 2>/dev/null && \
+            echo "  pnpm cafile: deleted" || echo "  pnpm: cafile not configured"
+    else
+        echo "  pnpm is not installed"
     fi
 
     # Java keytool
@@ -209,7 +229,8 @@ create_cert_bundle() {
   cat "$tmp_sub" >> "$certDir/$certName"
   if [ $full_bundle -eq 1 ]; then
     cat "$tmp_pub" >> "$certDir/$certName"
-    # Netskope-only sidecar for tools/endpoints that bypass the proxy and need the minimal set.
+    # Netskope-only sidecar — for connections that are always intercepted by the
+    # proxy and only need to trust the Netskope certs, without the public roots.
     cat "$tmp_root" "$tmp_sub" > "$certDir/netskope_only.pem"
   fi
 }
@@ -252,7 +273,14 @@ else
   if [ ! -d "$certDir" ]; then
     echo "$certDir does not exist."
     echo "creating $certDir"
-    mkdir -p $certDir
+    mkdir -p "$certDir"
+  fi
+
+  # Not maintained in --netskope-only mode — remove a stale sidecar left over
+  # from an earlier full-bundle run even if we end up keeping the existing
+  # main bundle below, so it's never mistaken for a freshly generated one.
+  if [ $full_bundle -eq 0 ]; then
+    rm -f "$certDir/netskope_only.pem"
   fi
 
   if [ -z "$tenantName" ]; then
@@ -314,14 +342,14 @@ configure_tool() {
       if [[ ${!env_var} == "$certDir/$certName" ]]; then
         echo "$tool_name already configured"
       else
-        echo "export $env_var=\"$certDir/$certName\"" >> $shell
+        echo "export $env_var=\"$certDir/$certName\"" >> "$shell"
         echo "$tool_name configured"
-        source $shell
+        source "$shell"
         echo "export $env_var=\"$certDir/$certName\"" >> configured_tools.sh
       fi
     fi
     if [[ -n "$post_command" ]]; then
-      eval $post_command
+      eval "$post_command"
       echo "$post_command" >> configured_tools.sh
     fi
   else
@@ -339,17 +367,19 @@ configure_tool "OpenSSL" "SSL_CERT_FILE" "openssl" "" "openssl version"
 configure_tool "cURL" "SSL_CERT_FILE" "curl" ""
 configure_tool "Python Requests Library" "REQUESTS_CA_BUNDLE" "" ""
 configure_tool "AWS CLI" "AWS_CA_BUNDLE" "aws" ""
-configure_tool "Google Cloud CLI" "" "gcloud" "gcloud config set core/custom_ca_certs_file $certDir/$certName"
-configure_tool "NodeJS Package Manager (NPM)" "" "npm" "npm config set cafile $certDir/$certName"
+configure_tool "Google Cloud CLI" "" "gcloud" "gcloud config set core/custom_ca_certs_file \"$certDir/$certName\""
+configure_tool "NodeJS Package Manager (NPM)" "" "npm" "npm config set cafile \"$certDir/$certName\""
 configure_tool "NodeJS" "NODE_EXTRA_CA_CERTS" "node" ""
 configure_tool "Ruby" "SSL_CERT_FILE" "ruby" ""
-configure_tool "PHP Composer" "" "composer" "composer config --global cafile $certDir/$certName"
+configure_tool "PHP Composer" "" "composer" "composer config --global cafile \"$certDir/$certName\""
 configure_tool "GoLang" "SSL_CERT_FILE" "go" ""
 configure_tool "Azure CLI" "REQUESTS_CA_BUNDLE" "az" ""
 configure_tool "Python PIP" "REQUESTS_CA_BUNDLE" "pip3" ""
 configure_tool "Oracle Cloud CLI" "REQUESTS_CA_BUNDLE" "oci" ""
 configure_tool "Cargo Package Manager" "SSL_CERT_FILE" "cargo" ""
-configure_tool "Yarn" "" "yarnpkg" "yarnpkg config set httpsCaFilePath $certDir/$certName"
+configure_tool "Yarn" "" "yarnpkg" "yarnpkg config set httpsCaFilePath \"$certDir/$certName\""
+# pnpm reads the same npm-compatible "cafile" config key.
+configure_tool "pnpm" "" "pnpm" "pnpm config set cafile \"$certDir/$certName\""
 
 # Check if Azure Storage Explorer exists
 echo
@@ -372,4 +402,4 @@ fi
 # - post_command: Any additional configuration command needed after setting the environment variable (can be empty if not needed)
 #
 # Example for adding a hypothetical tool "MyTool":
-# configure_tool "MyTool" "MYTOOL_CA_CERTS" "mytool" "mytool config set cafile $certDir/$certName"
+# configure_tool "MyTool" "MYTOOL_CA_CERTS" "mytool" "mytool config set cafile \"$certDir/$certName\""
