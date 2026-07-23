@@ -42,6 +42,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 - Oracle Cloud CLI
 - Cargo
 - Yarn
+- pnpm
 - Azure Storage Explorer
 
 ### Windows scripts (PS1, CMD, Python on Windows)
@@ -221,6 +222,8 @@ Or
 **Build from source:** see [`tauri-app/README.md`](tauri-app/README.md).
 
 The GUI and the scripts are independent — both live in this repo and serve different audiences. Users who want to modify or automate the configuration should use the scripts directly.
+
+The Select Tools step has a **Refresh** button — use it after installing a tool without restarting the app (any tool you'd already manually unchecked stays unchecked). On macOS/Linux, the app also fixes up its own `PATH` at startup by asking your login shell for it, since GUI apps launched from Finder/Dock otherwise only see a minimal PATH that omits Homebrew, nvm, `~/.cargo/bin`, etc. — this is also why a tool installed via one of those could be invisible until the app's `PATH` fix runs (first launch after an update) or you hit Refresh.
 
 ## Credit
 

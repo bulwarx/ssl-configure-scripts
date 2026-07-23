@@ -10,6 +10,27 @@ pub fn default_bundle_dir() -> String {
         .to_string()
 }
 
+/// Human-readable OS + CPU architecture, e.g. "macOS (Apple Silicon)".
+///
+/// The frontend used to read `navigator.platform` for this, but WebKit
+/// reports "MacIntel" for every Mac regardless of actual architecture (kept
+/// for web compatibility) — so an Apple Silicon machine showed as Intel.
+/// `std::env::consts` reflects the real target the binary was compiled for.
+#[tauri::command]
+pub fn platform_info() -> String {
+    let arch_label = match std::env::consts::ARCH {
+        "aarch64" => "Apple Silicon",
+        "x86_64" => "Intel",
+        other => other,
+    };
+    match std::env::consts::OS {
+        "macos" => format!("macOS ({arch_label})"),
+        "windows" => format!("Windows ({})", std::env::consts::ARCH),
+        "linux" => format!("Linux ({})", std::env::consts::ARCH),
+        other => format!("{other} ({})", std::env::consts::ARCH),
+    }
+}
+
 /// Reduce whatever the user pasted to a bare host like `mytenant.eu.goskope.com`.
 /// Tolerates `https://`, `http://`, trailing slashes, and accidental path/query
 /// suffixes — anything else would produce a malformed URL when we splice it
