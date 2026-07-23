@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.0] - 2026-07-23
+
+### Added
+- **`configure_tools_windows.ps1` now has a real `[CmdletBinding()] param()` block** (`-TenantName`, `-OrgKey`, `-CertBundle`, `-CertName`, `-CertDir`, `-Recreate`, `-Rollback`, `-NetskopeOnly`, `-CreateReplay`) with full comment-based help (`Get-Help .\configure_tools_windows.ps1 -Full` now works) — replacing the "hand-edit variables inside the file" mechanism as the primary way to run it unattended. Editing the parameter defaults directly still works unchanged, for contexts that can't pass arguments at all (e.g. Intune "platform scripts").
+- **`configure_tools_windows.cmd` gained named flag parsing** (`tenant-name=`, `org-key=`, `cert-name=`, `cert-dir=`, `cert-bundle=`, `recreate`, `create-replay`) — previously it could not perform an unattended download at all; every value except `rollback`/`netskope-only` was interactive-only.
+- **README: rewrote "Silent / Automated Deployment"** with per-MDM-tool guidance (Intune Win32 app vs. platform script, Jamf's positional-only script parameters, SCCM, BigFix) and promotes `--cert-bundle`/`-CertBundle` as the recommended path for MDM/at-scale deployment — pre-distributing the bundle means the org key never has to touch the endpoint at all, unlike the tenant+org-key download path where it inevitably appears in a flag/parameter/policy log somewhere (the same tradeoff Netskope's and Zscaler's own silent MSI installers accept for their enrollment tokens).
+
+### Fixed
+- **`configure_tools_windows.ps1`: the "create replay script?" silent-mode fix from the previous release was silently broken** — a leftover `$createReplay = $false` further down in the file was unconditionally re-initializing the variable after the parameter block set it, discovered while implementing the `param()` block above.
+- Windows PowerShell 5.1 vs 7 requirement documented consistently across the README (Requirements section, scripts table, Quick Start, rollback examples, SmartScreen guidance) and the script's own `#Requires` line, which previously under-declared its actual minimum version (5.1 instead of 7.0) and so failed partway through with confusing errors instead of refusing to run with a clear message.
+
 ## [0.4.1] - 2026-07-23
 
 ### Fixed

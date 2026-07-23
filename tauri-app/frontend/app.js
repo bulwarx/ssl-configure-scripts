@@ -574,7 +574,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (e) {
     console.warn('platform_info failed:', e);
   }
-  document.getElementById('sb-footer').textContent = `v0.4.1 · ${platform}`;
+  document.getElementById('sb-footer').textContent = `v0.5.0 · ${platform}`;
 
   render();
 
