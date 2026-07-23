@@ -285,6 +285,11 @@ async function refreshTools() {
   const btn = document.getElementById('btn-refresh-tools');
   const hadRows = document.querySelectorAll('#step-4 .tool-row').length > 0;
   const previouslyOn = new Set(getSelectedToolIds());
+  // Only a tool that was already installed (and thus could have been
+  // deselected) counts as an explicit deselection below — a tool that just
+  // became installed was never "on" before but should default to checked,
+  // same as a first load, not get force-unchecked.
+  const previouslyInstalled = new Set(detectedTools.filter(t => t.installed).map(t => t.id));
 
   btn.disabled = true;
   const original = btn.textContent;
@@ -295,7 +300,8 @@ async function refreshTools() {
       // renderTools() defaults every installed tool back to checked —
       // restore explicit deselections from before the refresh.
       document.querySelectorAll('#step-4 .tool-row').forEach(row => {
-        if (!row.classList.contains('disabled') && !previouslyOn.has(row.dataset.id)) {
+        const id = row.dataset.id;
+        if (!row.classList.contains('disabled') && previouslyInstalled.has(id) && !previouslyOn.has(id)) {
           const cb = row.querySelector('.cb');
           row.classList.remove('on');
           cb.classList.remove('on');

@@ -37,7 +37,9 @@ def _augment_path():
     existing = set(current.split(os.pathsep))
     to_add = [d for d in candidates if os.path.isdir(d) and d not in existing]
     if to_add:
-        os.environ['PATH'] = os.pathsep.join(to_add + [current])
+        # Drop any empty segment (e.g. from an unset/empty PATH) — an empty
+        # entry means "search the current directory", a real security risk.
+        os.environ['PATH'] = os.pathsep.join(p for p in (to_add + [current]) if p)
 
 
 _augment_path()
@@ -1012,13 +1014,13 @@ tools = [
     ("OpenSSL", "SSL_CERT_FILE", "openssl", ""),
     ("cURL", "SSL_CERT_FILE", "curl", ""),
     ("AWS CLI", "AWS_CA_BUNDLE", "aws", ""),
-    ("Google Cloud CLI", None, "gcloud", f'gcloud config set core/custom_ca_certs_file {_cert_path}'),
-    ("NodeJS Package Manager (NPM)", None, "npm", f'npm config set cafile {_cert_path}'),
+    ("Google Cloud CLI", None, "gcloud", f'gcloud config set core/custom_ca_certs_file "{_cert_path}"'),
+    ("NodeJS Package Manager (NPM)", None, "npm", f'npm config set cafile "{_cert_path}"'),
     # pnpm reads the same npm-compatible "cafile" config key.
-    ("pnpm", None, "pnpm", f'pnpm config set cafile {_cert_path}'),
+    ("pnpm", None, "pnpm", f'pnpm config set cafile "{_cert_path}"'),
     ("NodeJS", "NODE_EXTRA_CA_CERTS", "node", ""),
     ("Ruby", "SSL_CERT_FILE", "ruby", ""),
-    ("PHP Composer", None, "composer", f'composer config --global cafile {_cert_path}'),
+    ("PHP Composer", None, "composer", f'composer config --global cafile "{_cert_path}"'),
     ("GoLang", "SSL_CERT_FILE", "go", ""),
     ("Azure CLI", "REQUESTS_CA_BUNDLE", "az", ""),
     ("Oracle Cloud CLI", "REQUESTS_CA_BUNDLE", "oci", ""),
@@ -1030,7 +1032,7 @@ tools = [
 # because a conflicting "yarn" binary already exists there.
 _yarn_cmd = next((c for c in ('yarn', 'yarnpkg') if command_exists(c)), None)
 if _yarn_cmd:
-    tools.append(("Yarn", None, _yarn_cmd, f'{_yarn_cmd} config set httpsCaFilePath {_cert_path}'))
+    tools.append(("Yarn", None, _yarn_cmd, f'{_yarn_cmd} config set httpsCaFilePath "{_cert_path}"'))
 else:
     tools.append(("Yarn", None, "yarn", ""))
 

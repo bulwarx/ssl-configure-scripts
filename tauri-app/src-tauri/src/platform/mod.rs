@@ -97,7 +97,14 @@ pub fn fix_path_env() {
         }
         let dir_str = dir.to_string_lossy();
         if !path.split(':').any(|p| p == dir_str) {
-            path = format!("{}:{}", dir_str, path);
+            // Avoid producing a leading/trailing empty PATH segment when
+            // `path` is empty — an empty segment means "search the current
+            // directory", a real security risk, not just a cosmetic issue.
+            path = if path.is_empty() {
+                dir_str.into_owned()
+            } else {
+                format!("{}:{}", dir_str, path)
+            };
         }
     }
 

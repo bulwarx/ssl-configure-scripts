@@ -301,9 +301,9 @@ call :command_exists yarn
 if %ERRORLEVEL% EQU 0 (
     echo %GRN%Yarn is installed%RST%
     yarn --version
-    yarn config set cafile %certDir%\%certName%
+    yarn config set cafile "%certDir%\%certName%"
     echo %GRN%Yarn configured%RST%
-    if /i "%createReplay%"=="y" echo yarn config set cafile %certDir%\%certName% >> configured_tools.bat
+    if /i "%createReplay%"=="y" echo yarn config set cafile "%certDir%\%certName%" >> configured_tools.bat
 ) else (
     echo %GRY%Yarn is not installed%RST%
 )
@@ -313,9 +313,9 @@ call :command_exists pnpm
 if %ERRORLEVEL% EQU 0 (
     echo %GRN%pnpm is installed%RST%
     pnpm --version
-    pnpm config set cafile %certDir%\%certName%
+    pnpm config set cafile "%certDir%\%certName%"
     echo %GRN%pnpm configured%RST%
-    if /i "%createReplay%"=="y" echo pnpm config set cafile %certDir%\%certName% >> configured_tools.bat
+    if /i "%createReplay%"=="y" echo pnpm config set cafile "%certDir%\%certName%" >> configured_tools.bat
 ) else (
     echo %GRY%pnpm is not installed%RST%
 )
