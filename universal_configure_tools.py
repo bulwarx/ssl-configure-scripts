@@ -619,7 +619,15 @@ def create_cert_bundle():
         ok(f'Netskope-only cert saved: {netskope_only_path}')
 
 if existing_bundle:
-    # ─── Existing bundle: validate and use in place, no download ───────────
+    # ─── Existing bundle: validate, then copy to the canonical cert_dir/
+    # cert_name location (--cert-dir/--cert-name if given, else the same
+    # defaults as the download path) so every tool ends up configured
+    # against a stable path — not wherever the source file happened to
+    # live. This matters for MDM deployment: an Intune Win32 app's staged
+    # package content is deleted right after the install command finishes,
+    # so a script bundled alongside the cert just needs --cert-bundle
+    # pointing at its own package directory and this copies it out to
+    # somewhere permanent before that happens.
     existing_bundle = os.path.normpath(os.path.expanduser(existing_bundle))
     if not os.path.isfile(existing_bundle):
         err(f'Certificate bundle not found: {existing_bundle}')
@@ -628,11 +636,19 @@ if existing_bundle:
         if b'-----BEGIN CERTIFICATE-----' not in f.read():
             err(f'{existing_bundle} does not contain a PEM certificate.')
             sys.exit(1)
-    cert_dir = os.path.dirname(existing_bundle)
-    cert_name = os.path.basename(existing_bundle)
+
+    cert_name = cli_cert_name or 'netskope-cert-bundle.pem'
+    cert_dir = os.path.normpath(os.path.expanduser(cli_cert_dir or '~/netskope'))
+    os.makedirs(cert_dir, exist_ok=True)
+    bundle_path = os.path.join(cert_dir, cert_name)
+
+    if os.path.normpath(existing_bundle) != os.path.normpath(bundle_path):
+        shutil.copy2(existing_bundle, bundle_path)
+        ok(f'Copied certificate bundle to: {bundle_path}')
+
     # Treat as freshly provided so Python/Java stores are (re)configured.
     cert_was_recreated = True
-    ok(f'Using existing certificate bundle: {existing_bundle}')
+    ok(f'Using existing certificate bundle: {bundle_path}')
 else:
     # ─── Download from Netskope ────────────────────────────────────────────
     cert_name = cli_cert_name or (

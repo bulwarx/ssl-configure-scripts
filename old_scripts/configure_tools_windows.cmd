@@ -1,4 +1,7 @@
 @echo off
+:: DEPRECATED — kept for historical reference only, not maintained or tested.
+:: Use configure_tools_windows.ps1 (PowerShell 7+) for Windows instead; see
+:: the main README for details.
 :: This tool will try to detect common cli tools and will configure the Netskope SSL certificate bundle.
 
 :: ANSI color setup (Windows 10 1511+ supports VT sequences in cmd)
@@ -9,8 +12,6 @@ set "RED=%ESC%[91m"
 set "CYN=%ESC%[96m"
 set "GRY=%ESC%[90m"
 set "RST=%ESC%[0m"
-
-echo DEBUG raw args: [%1] [%2] [%3]
 
 :: Check for rollback mode
 if /i "%~1"=="rollback" goto :do_rollback
@@ -70,13 +71,11 @@ if not exist "%certDir%" (
     echo %YLW%Creating %certDir%%RST%
     mkdir "%certDir%"
 )
-echo DEBUG checkpoint A (after mkdir block)
 
 :: Not maintained in netskope-only mode — remove a stale sidecar left over
 :: from an earlier full-bundle run even if we end up keeping the existing
 :: main bundle below, so it's never mistaken for a freshly generated one.
 if "%fullBundle%"=="0" if exist "%certDir%\netskope_only.pem" del /f /q "%certDir%\netskope_only.pem" >NUL 2>&1
-echo DEBUG checkpoint B (after sidecar cleanup)
 
 :: Get tenant information to create certificate bundle
 if not defined tenantName if "%silentRun%"=="0" set /p tenantName="Please provide full tenant name (ex: mytenant.eu.goskope.com):"
@@ -573,7 +572,6 @@ goto :eof
 :: spaces, e.g. "cert-bundle=C:\Program Files\bundle.pem".
 :parse_arg
 set "arg=%~1"
-echo DEBUG parse_arg received: [%arg%]
 set "prefix=%arg:~0,12%"
 if /i "%prefix%"=="tenant-name=" set "tenantName=%arg:~12%"
 set "prefix=%arg:~0,8%"

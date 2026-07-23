@@ -640,18 +640,35 @@ if ([string]::IsNullOrWhiteSpace($certBundle) -and -not $silentRun) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
-    # ─── Existing bundle: validate and use in place, no download ──────────────
-    $certPath = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certBundle))
-    if (-not (Test-Path $certPath -PathType Leaf)) {
-        Write-Err "Certificate bundle not found: $certPath"
+    # ─── Existing bundle: validate, then copy to the canonical certDir/
+    # certName location (-CertDir/-CertName if given, else the same
+    # defaults as the download path) so every tool ends up configured
+    # against a stable path — not wherever the source file happened to
+    # live. This matters for MDM deployment: an Intune Win32 app's staged
+    # package content is deleted right after the install command finishes,
+    # so a script bundled alongside the cert just needs -CertBundle
+    # pointing at its own package directory and this copies it out to
+    # somewhere permanent before that happens.
+    $srcPath = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certBundle))
+    if (-not (Test-Path $srcPath -PathType Leaf)) {
+        Write-Err "Certificate bundle not found: $srcPath"
         exit 1
     }
-    if ((Get-Content $certPath -Raw) -notmatch '-----BEGIN CERTIFICATE-----') {
-        Write-Err "$certPath does not contain a PEM certificate."
+    if ((Get-Content $srcPath -Raw) -notmatch '-----BEGIN CERTIFICATE-----') {
+        Write-Err "$srcPath does not contain a PEM certificate."
         exit 1
     }
-    $certDir  = Split-Path -Parent $certPath
-    $certName = Split-Path -Leaf   $certPath
+
+    if ([string]::IsNullOrWhiteSpace($certName)) { $certName = 'netskope-cert-bundle.pem' }
+    if ([string]::IsNullOrWhiteSpace($certDir))  { $certDir  = Join-Path $env:USERPROFILE 'netskope' }
+    $certDir  = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))
+    if (-not (Test-Path $certDir)) { New-Item -ItemType Directory -Path $certDir -Force | Out-Null }
+    $certPath = Join-Path $certDir $certName
+
+    if ($srcPath -ne $certPath) {
+        Copy-Item -Path $srcPath -Destination $certPath -Force
+        Write-Ok "Copied certificate bundle to: $certPath"
+    }
     $certWasRecreated = $true   # treat as freshly provided so stores are (re)configured
     Write-Ok "Using existing certificate bundle: $certPath"
 } else {
