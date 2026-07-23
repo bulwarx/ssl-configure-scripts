@@ -76,15 +76,13 @@ These behaviors are legitimate and core to the tool's purpose, but they resemble
 - On Windows SmartScreen, click **More info → Run anyway**.
 - Allow / unblock the file in your antivirus or endpoint protection, or add an exclusion for it.
 - For the PowerShell script you may need to allow execution: `pwsh -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1` (requires PowerShell 7+ — see Requirements above).
-- On macOS, opening the GUI app's `.dmg`/`.app` for the first time shows **"Apple could not verify 'SSL Configurator' is free of malware"** (an unidentified-developer warning, not real corruption). Either:
-  - Right-click (or Control-click) the app → **Open** → **Open** again in the dialog — no Terminal needed, works on most macOS versions, or
-  - Remove the quarantine flag from Terminal:
+- On macOS, opening the GUI app's `.dmg`/`.app` for the first time shows **"Apple could not verify 'SSL Configurator' is free of malware that may harm your Mac or compromise your privacy"**, with only a "Move to Trash" option in the dialog — this is not real corruption, and it's expected given the app is ad-hoc signed rather than signed with a paid Apple Developer ID. Unlike a Developer-ID-signed (but unnotarized) app, an ad-hoc-signed app doesn't get an "Open Anyway" button in System Settings → Privacy & Security — Gatekeeper treats ad-hoc signing as still effectively unidentified. The only way through today is Terminal:
 
     ```sh
     xattr -cr "/path/to/SSL Configurator.app"
     ```
 
-  The app is ad-hoc signed (no cost, no Apple Developer account), which is enough to satisfy Apple Silicon's requirement that every binary be signed — without it, macOS would refuse to run the app at all with a hard **"is damaged and can't be opened"** error instead of the milder prompt above. Ad-hoc signing alone doesn't clear Gatekeeper's quarantine check; only Apple notarization (a paid Developer Program enrollment) does that.
+  The app is ad-hoc signed (no cost, no Apple Developer account), which is enough to satisfy Apple Silicon's requirement that every binary be signed — without it, macOS would refuse to run the app at all with an even harder **"is damaged and can't be opened"** error and no `xattr` workaround. Eliminating this prompt entirely (no Terminal step for anyone) requires a paid Apple Developer Program enrollment and full notarization, which isn't set up.
 
 Only run these tools from a source you trust, and review the contents before executing.
 

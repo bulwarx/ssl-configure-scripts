@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.1] - 2026-07-23
+
+### Fixed
+- **`configure_tools_windows.ps1` silent/unattended runs were broken by a real parameter-binding bug**: none of the `param()` fields declared a `Position`, so PowerShell auto-assigns positions by declaration order. Invoking the script with a bare path and no `-CertBundle` name (`pwsh -File configure_tools_windows.ps1 C:\bundle.pem`) silently bound that path to `-TenantName` instead — `$CertBundle` and `$OrgKey` stayed empty, `$silentRun` evaluated false, and every prompt fired, exactly matching a user report of "not silent, and doesn't use the certificate bundle I gave it, no orgkey or url". Fixed with `[CmdletBinding(PositionalBinding = $false)]` plus `[Parameter(Position = 0)]` on `CertBundle` alone — named parameters now work for everything, and the one bare-positional case supported is the cert bundle path itself (the recommended enterprise path). `-CertBundle` (or a bare path) already took precedence over stale `-TenantName`/`-OrgKey` values once actually bound correctly — that part of the logic was already right; the parameter binding was silently preventing it from ever being exercised.
+
+### Added
+- **CI smoke tests for the actual silent/unattended install paths**, on both `windows-latest` and `ubuntu-latest`, since these can't be tested on macOS. Runs each script against a throwaway self-signed cert bundle and asserts: no prompt fires, the given `--cert-bundle`/`-CertBundle` is actually used, and it takes precedence over stale tenant/orgkey values passed alongside it. Includes a dedicated regression test for the bare-positional-argument bug above. Covers `configure_tools_linux.sh`, `universal_configure_tools.py`, `configure_tools_windows.ps1`, and `configure_tools_windows.cmd`.
+
 ## [0.5.0] - 2026-07-23
 
 ### Added
