@@ -185,7 +185,7 @@ ORGKEY=your-org-key
 curl -k -f "https://addon-$TENANT/config/org/cert?orgkey=$ORGKEY" > netskope-cert-bundle.pem   # RootCA first
 curl -k -f "https://addon-$TENANT/config/ca/cert?orgkey=$ORGKEY" >> netskope-cert-bundle.pem    # SubCA second
 
-# Optional: append the public CA roots too (full bundle, the default the scripts produce)
+# Optional: append the public CA roots too (full bundle, the default the scripts produce, full bundle is recommended in most use cases and it make sure the applications will still work even when there is an ssl decryption bypass)
 curl -k -f -L https://curl.se/ca/cacert.pem >> netskope-cert-bundle.pem
 
 # Sanity check — should print 2 (or 3 with the public roots appended)
@@ -201,7 +201,7 @@ $root = (Invoke-WebRequest -Uri "https://addon-$tenant/config/org/cert?orgkey=$o
 $sub  = (Invoke-WebRequest -Uri "https://addon-$tenant/config/ca/cert?orgkey=$orgKey"  -SkipCertificateCheck).Content
 [System.IO.File]::WriteAllBytes("netskope-cert-bundle.pem", $root + $sub)
 
-# Optional: append the public CA roots too (full bundle, the default the scripts produce)
+# Optional: append the public CA roots too (full bundle, the default the scripts produce, full bundle is recommended in most use cases and it make sure the applications will still work even when there is an ssl decryption bypass)
 $pub = (Invoke-WebRequest -Uri "https://curl.se/ca/cacert.pem" -SkipCertificateCheck).Content
 [System.IO.File]::WriteAllBytes("netskope-cert-bundle.pem", $root + $sub + $pub)
 ```
