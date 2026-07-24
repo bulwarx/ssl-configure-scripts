@@ -13,7 +13,7 @@ These behaviors are legitimate and core to the tool's purpose, but they resemble
 
 - On Windows SmartScreen, click **More info → Run anyway**.
 - Allow / unblock the file in your antivirus or endpoint protection, or add an exclusion for it.
-- For the PowerShell script you may need to allow execution: `pwsh -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1` (requires PowerShell 7+ — see [Requirements](../README.md#requirements)).
+- For the PowerShell script you may need to allow execution: `powershell.exe -ExecutionPolicy Bypass -File .\configure_tools_windows.ps1` (or `pwsh -ExecutionPolicy Bypass -File ...` — both PowerShell editions work, see [Requirements](../README.md#requirements)).
 - On macOS, opening the GUI app's `.dmg`/`.app` for the first time shows **"Apple could not verify 'SSL Configurator' is free of malware that may harm your Mac or compromise your privacy"**, with only a "Move to Trash" option in the dialog — this is not real corruption, and it's expected given the app is ad-hoc signed rather than signed with a paid Apple Developer ID. Unlike a Developer-ID-signed (but unnotarized) app, an ad-hoc-signed app doesn't get an "Open Anyway" button in System Settings → Privacy & Security — Gatekeeper treats ad-hoc signing as still effectively unidentified. The only way through today is Terminal:
 
     ```sh

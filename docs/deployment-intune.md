@@ -10,7 +10,7 @@ This is the full path from "I have a `.pem` and a script" to "it's installed on 
 
 **Prerequisites, before you start:**
 - **The [Microsoft Win32 Content Prep Tool](https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool)** (`IntuneWinAppUtil.exe`) — this is what packages a folder into the `.intunewin` file Intune requires for Win32 apps. Free download, run it on any Windows machine (doesn't need to be a managed device).
-- **PowerShell 7+ (`pwsh.exe`) must already be present on the target devices.** Windows only ships PowerShell 5.1 (`powershell.exe`), which this script does not support (see [Requirements](../README.md#requirements)). If your fleet doesn't already have PS7, deploy it first as its own required Win32 app (Microsoft publishes one, or package the [MSI installer](https://aka.ms/powershell)) — the app below won't run without it. Alternatively, use `universal_configure_tools.py` instead, which has the same problem but for Python 3 + `pip install -r requirements.txt` instead of PS7.
+- **No PowerShell version pre-deployment needed.** `configure_tools_windows.ps1` runs on the Windows PowerShell 5.1 (`powershell.exe`) that ships with every supported Windows version, as well as PowerShell 7+ (`pwsh.exe`) if your fleet already has it — either works, with no extra Win32 app/dependency required first.
 
 **1. Prepare a source folder** containing just the script and the bundle, nothing else:
 ```
@@ -29,10 +29,11 @@ This produces `C:\intune-output\configure_tools_windows.intunewin`.
 
 **4. Program tab:**
 ```
-Install command:    pwsh.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -CertBundle ".\netskope-cert-bundle.pem"
-Uninstall command:   pwsh.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -Rollback
+Install command:    powershell.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -CertBundle ".\netskope-cert-bundle.pem"
+Uninstall command:   powershell.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -Rollback
 Install behavior:    User   ← see the callout below before picking System instead
 ```
+(`pwsh.exe` works identically instead of `powershell.exe` if you'd rather target PowerShell 7+ specifically.)
 Intune runs the install command with its working directory set to the extracted package folder, so the relative `.\netskope-cert-bundle.pem` resolves correctly — no `%~dp0`/`$PSScriptRoot` wrapper needed. The script copies that bundle out to `%USERPROFILE%\netskope\netskope-cert-bundle.pem` (or wherever `-CertDir`/`-CertName` point) before configuring anything, so it survives Intune deleting the staging folder after install.
 
 > **Install behavior: User vs. System — this determines whether the tool actually works.** Everything this script configures — Git, npm, pip/certifi, VS Code settings, Docker's `ca.pem`, the `.curlrc` — lives under the signed-in user's profile (`$env:USERPROFILE`, `$env:APPDATA`). If you set **Install behavior: System**, the script runs as the `SYSTEM` account instead of the real user, so `$env:USERPROFILE` resolves to the SYSTEM profile and every one of those per-user configs gets written somewhere nobody will ever use. **Install behavior: User** is almost always the right choice here — it runs in the actual signed-in user's context, so the per-user configs land in the right place. The one thing that prefers `System` (importing the cert into the machine-wide `LocalMachine\Root` store) still works fine under `User` context: the script tries `LocalMachine\Root` first and automatically falls back to `CurrentUser\Root`, which every browser and CLI tool here already trusts.
@@ -41,7 +42,7 @@ Intune runs the install command with its working directory set to the extracted 
 >
 > **If you must use System context anyway** (your Intune setup only supports device-targeted Win32 apps, or you have another reason to require it), at minimum override `-CertDir` to a location every user can read and write, e.g. `-CertDir C:\ProgramData\netskope\certs` — the default `%USERPROFILE%\netskope` resolves to the SYSTEM account's own profile under System context (`C:\Windows\System32\config\systemprofile\netskope`), which ordinary users can't read. Adjust the detection rule's path to match. **This only fixes where the bundle file itself ends up** — it does not fix the per-user tool configuration (Git, npm, pip/certifi, VS Code, `.curlrc`), which still gets written into the SYSTEM profile instead of the real user's, so those tools still won't pick up the certificate. Pair a System-context Win32 app (for the machine-wide cert store) with a separate per-user mechanism — a logon script, scheduled task, or Proactive Remediation running as the logged-on user — that runs `-CertBundle C:\ProgramData\netskope\certs\netskope-cert-bundle.pem` against the shared copy to cover the per-user tools too.
 
-**5. Requirements tab:** set the minimum OS version and architecture as usual for your fleet; there's nothing this script needs beyond PowerShell 7 (already covered by the prerequisite above).
+**5. Requirements tab:** set the minimum OS version and architecture as usual for your fleet; there's no PowerShell-version-specific requirement to add.
 
 **6. Detection rules:** add a **File** rule — path `%USERPROFILE%\netskope`, file `netskope-cert-bundle.pem`, "File exists". Intune only marks the app installed once the script has actually copied the bundle to that stable path, and won't try to reinstall it on every subsequent check-in.
 

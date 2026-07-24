@@ -22,7 +22,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 |--------|----------|-------|
 | `configure_tools_linux.sh` | Linux | Shell script |
 | `configure_tools_mac.sh` | macOS | Shell script |
-| `configure_tools_windows.ps1` | Windows | PowerShell script — most comprehensive. **Requires PowerShell 7+ (`pwsh`)**, not Windows PowerShell 5.1 |
+| `configure_tools_windows.ps1` | Windows | PowerShell script — most comprehensive. Runs on **Windows PowerShell 5.1** (built into Windows) or **PowerShell 7+ (`pwsh`)** |
 | `universal_configure_tools.py` | All platforms | Python — unified cross-platform coverage |
 
 > **`configure_tools_windows.cmd` is deprecated** and has moved to [`old_scripts/`](old_scripts/) — kept for historical reference only, not maintained or tested. Use `configure_tools_windows.ps1` for Windows.
@@ -71,7 +71,7 @@ Intended for environments with SSL inspection (MITM proxy), where tools fail TLS
 ## Requirements
 - Python 3 (for the universal script; platform-specific scripts are standalone)
 - OpenSSL CLI (for cert parsing; bundled with Windows scripts)
-- **PowerShell 7+ (`pwsh`) for `configure_tools_windows.ps1`** — Windows PowerShell 5.1 (the version built into Windows, `powershell.exe`) throws errors partway through the script and is not supported. Install PowerShell 7 from [aka.ms/powershell](https://aka.ms/powershell) (or `winget install Microsoft.PowerShell`) and run the script with `pwsh -File .\configure_tools_windows.ps1`, not `powershell -File ...`.
+- **`configure_tools_windows.ps1` runs on Windows PowerShell 5.1 or PowerShell 7+** — no separate install needed if you're just using the built-in `powershell.exe` (`powershell.exe -File .\configure_tools_windows.ps1`). PowerShell 7 (`pwsh -File ...`) works identically and is available from [aka.ms/powershell](https://aka.ms/powershell) (or `winget install Microsoft.PowerShell`) if you prefer it.
 
 
 ```
@@ -97,8 +97,8 @@ Run one script for your platform — it is recommended to use *universal_configu
 # macOS
 ./configure_tools_mac.sh
 
-# Windows PowerShell (requires PowerShell 7+ / pwsh — see Requirements)
-pwsh -File .\configure_tools_windows.ps1
+# Windows PowerShell (built-in powershell.exe or PowerShell 7+ pwsh both work)
+powershell.exe -File .\configure_tools_windows.ps1
 
 # Any platform (Python 3)
 python universal_configure_tools.py

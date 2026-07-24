@@ -6,6 +6,9 @@ name: Script Smoke Tests
 # (no real Netskope tenant needed). Catches exactly the class of bug this
 # was added for: a script that claims to run silently but still prompts, or
 # ignores a supplied --cert-bundle in favor of stale tenant/orgkey values.
+# configure_tools_windows.ps1 is tested under both PowerShell 7+ (pwsh) and
+# Windows PowerShell 5.1 (powershell.exe) — both are supported editions and
+# have real behavioral differences (see Get-ResponseBytes in the script).
 # configure_tools_windows.cmd is deprecated (see old_scripts/) and not covered.
 
 on:
@@ -128,3 +131,69 @@ jobs:
           Write-Host $out
           if ($out -notmatch 'Using existing certificate bundle') { Write-Error "did not use the cert bundle when tenant/orgkey were also given"; exit 1 }
           if ($out -match 'Tenant Reachable' -or $out -match 'Tenant Unreachable') { Write-Error "attempted tenant reachability despite -CertBundle being given"; exit 1 }
+
+      # ─── Windows PowerShell 5.1 (powershell.exe) — same scenarios, since
+      # configure_tools_windows.ps1 is meant to run on both editions, and
+      # they differ in real, non-obvious ways (e.g. Invoke-WebRequest's
+      # response .Content is a byte[] on PS6+/Core but a decoded [string]
+      # on 5.1 — see Get-ResponseBytes in the script).
+      - name: ps1 (Windows PowerShell 5.1) — named -CertBundle is silent, uses the bundle, and copies it to the canonical location
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          Remove-Item -Recurse -Force "$env:USERPROFILE\netskope" -ErrorAction SilentlyContinue
+          $out = (powershell.exe -NoProfile -File .\configure_tools_windows.ps1 -CertBundle "$PWD\fixture.pem" 2>&1 | Out-String)
+          Write-Host $out
+          if ($out -notmatch 'Using existing certificate bundle') { Write-Error "did not report using the cert bundle"; exit 1 }
+          if ($out -match 'Please provide') { Write-Error "script prompted interactively"; exit 1 }
+          if ($out -notmatch 'Copied certificate bundle to') { Write-Error "did not copy the bundle to the canonical location"; exit 1 }
+          if (-not (Test-Path "$env:USERPROFILE\netskope\netskope-cert-bundle.pem")) { Write-Error "canonical bundle file not found"; exit 1 }
+
+      - name: ps1 (Windows PowerShell 5.1) — bare positional path also binds to CertBundle (regression test)
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out = (powershell.exe -NoProfile -File .\configure_tools_windows.ps1 "$PWD\fixture.pem" 2>&1 | Out-String)
+          Write-Host $out
+          if ($out -notmatch 'Using existing certificate bundle') { Write-Error "bare positional path did not bind to CertBundle"; exit 1 }
+          if ($out -match 'Please provide') { Write-Error "script prompted interactively for the bare positional path"; exit 1 }
+
+      - name: ps1 (Windows PowerShell 5.1) — -CertBundle overrides stale -TenantName/-OrgKey
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $out = (powershell.exe -NoProfile -File .\configure_tools_windows.ps1 -CertBundle "$PWD\fixture.pem" `
+            -TenantName fake.example.com -OrgKey fakekey 2>&1 | Out-String)
+          Write-Host $out
+          if ($out -notmatch 'Using existing certificate bundle') { Write-Error "did not use the cert bundle when tenant/orgkey were also given"; exit 1 }
+          if ($out -match 'Tenant Reachable' -or $out -match 'Tenant Unreachable') { Write-Error "attempted tenant reachability despite -CertBundle being given"; exit 1 }
+
+      # Directly proves the fact Get-ResponseBytes in the script relies on: a
+      # real HTTPS download's raw bytes must come back byte-identical on both
+      # editions, despite Invoke-WebRequest's response .Content property
+      # being a totally different TYPE between them (byte[] on 6+/Core,
+      # decoded string on 5.1). Uses a real public HTTPS endpoint (the same
+      # one the script itself downloads for the public CA roots) since there's
+      # no live Netskope tenant available in CI to exercise the real
+      # New-CertBundle download path end-to-end.
+      - name: Invoke-WebRequest byte-content compatibility — Windows PowerShell 5.1
+        shell: powershell
+        timeout-minutes: 2
+        run: |
+          $resp = Invoke-WebRequest -Uri 'https://curl.se/ca/cacert.pem' -UseBasicParsing
+          if ($PSVersionTable.PSVersion.Major -ge 6) { $bytes = $resp.Content } else { $bytes = $resp.RawContentStream.ToArray() }
+          Write-Host "PSVersion: $($PSVersionTable.PSVersion)  bytes.Length: $($bytes.Length)"
+          if ($bytes.Length -lt 1000) { Write-Error "unexpectedly small byte count — likely got a string, not raw bytes"; exit 1 }
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch '-----BEGIN CERTIFICATE-----') { Write-Error "downloaded bytes do not decode to a certificate"; exit 1 }
+
+      - name: Invoke-WebRequest byte-content compatibility — PowerShell 7+
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $resp = Invoke-WebRequest -Uri 'https://curl.se/ca/cacert.pem' -UseBasicParsing
+          $bytes = $resp.Content
+          Write-Host "PSVersion: $($PSVersionTable.PSVersion)  bytes.Length: $($bytes.Length)"
+          if ($bytes.Length -lt 1000) { Write-Error "unexpectedly small byte count"; exit 1 }
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch '-----BEGIN CERTIFICATE-----') { Write-Error "downloaded bytes do not decode to a certificate"; exit 1 }

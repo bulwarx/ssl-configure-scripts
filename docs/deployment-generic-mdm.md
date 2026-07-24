@@ -13,8 +13,8 @@ Every deployment onto an MDM/RMM tool boils down to the same four building block
 # Linux/macOS
 /bin/bash configure_tools_mac.sh --cert-bundle /path/to/bundle.pem
 
-# Windows (PowerShell 7+ required — see Requirements)
-pwsh.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -CertBundle "C:\path\to\bundle.pem"
+# Windows (built-in Windows PowerShell 5.1 or PowerShell 7+, either works)
+powershell.exe -ExecutionPolicy Bypass -File configure_tools_windows.ps1 -CertBundle "C:\path\to\bundle.pem"
 
 # Any platform
 python universal_configure_tools.py --cert-bundle /path/to/bundle.pem

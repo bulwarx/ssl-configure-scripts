@@ -1,11 +1,11 @@
-#Requires -Version 7.0
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Configures or rolls back the Netskope SSL certificate bundle for developer tools.
 .DESCRIPTION
-    Requires PowerShell 7+ (pwsh) — run with `pwsh -File .\configure_tools_windows.ps1`.
-    Windows PowerShell 5.1 (powershell.exe) is not supported and throws errors partway
-    through the script.
+    Runs on both Windows PowerShell 5.1 (powershell.exe, built into Windows) and
+    PowerShell 7+ (pwsh). Run with `powershell.exe -File .\configure_tools_windows.ps1`
+    or `pwsh -File .\configure_tools_windows.ps1` — either works.
 
     Two ways to run unattended, for two different deployment situations:
       - Named parameters (Intune Win32 apps, SCCM, BigFix — anything that lets you
@@ -106,6 +106,20 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     $skipTls = @{}
 } else {
     $skipTls = @{ SkipCertificateCheck = $true }
+}
+
+# Invoke-WebRequest's response .Content property is a different TYPE between
+# editions: PowerShell 6+/7 (Core) returns it as a byte[] already, but Windows
+# PowerShell 5.1 (.NET Framework) returns a decoded [string] instead — reading
+# it as bytes there would silently corrupt the binary PEM data. RawContentStream
+# (a MemoryStream of the untouched response bytes) is only reliably populated
+# on 5.1; Core's rewritten web cmdlets don't need it since .Content is already
+# what we want.
+function Get-ResponseBytes($resp) {
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        return $resp.Content
+    }
+    return $resp.RawContentStream.ToArray()
 }
 
 # ─── Utility helpers ─────────────────────────────────────────────────────────
@@ -378,7 +392,7 @@ function New-CertBundle {
             Write-Err 'Check tenant URL and orgkey, then re-run.'
             exit 1
         }
-        $bytes = $resp.Content
+        $bytes = Get-ResponseBytes $resp
         $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
         if ($text -notmatch '-----BEGIN CERTIFICATE-----') {
             Write-Err "Response from $url does not contain a certificate."
