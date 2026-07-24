@@ -105,7 +105,7 @@ python universal_configure_tools.py
 ```
 
 By default the bundle contains the two Netskope certs (RootCA + SubCA) plus the public `curl.se/ca/cacert.pem` CA roots.
-pass `--netskope-only` or `-NetskopeOnly` to use just the two Netskope certs, or `--cert-bundle`/`-CertBundle` to use an existing bundle instead of downloading. 
+pass `--netskope-only`/`-NetskopeOnly` to use just the two Netskope certs, or `--cert-bundle`/`-CertBundle` to use an existing bundle instead of downloading. 
 See **[Usage Examples by Scenario](docs/usage-examples.md)** for these and more (silent deployment, custom bundle location, forced recreation, etc.) and **[Parameters Reference](docs/parameters-reference.md)** for what every flag means.
 
 ## Rollback
