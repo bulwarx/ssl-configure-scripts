@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - **README/docs updated to reflect PowerShell 5.1 support** — the Scripts Included table, Requirements section, and the Intune/generic-MDM deployment guides no longer describe pre-deploying PowerShell 7 as a prerequisite; Windows's built-in `powershell.exe` is sufficient on its own.
+- **`docs/deployment-intune.md`: expanded "Option B: Platform script" with the missing prerequisite step** — a platform script is a single uploaded `.ps1` with no way to attach a second file, so the `.pem` bundle has to already be staged on the device (e.g. via a trivial file-drop Win32 app, documented with a concrete example) before the platform script's `-CertBundle` default can point at it. Clarifies the read-from (staged path) vs. write-to (canonical per-user `certDir`/`certName`) distinction, since the script copies from one to the other before configuring any tool.
 
 ## [0.5.1] - 2026-07-23
 
