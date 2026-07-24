@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5.2] - 2026-07-24
+
+### Fixed
+- **`configure_tools_windows.ps1` didn't actually work on Windows PowerShell 5.1** despite `#Requires -Version 7.0` framing it as an active choice rather than a known gap — the real, non-obvious incompatibility was that `Invoke-WebRequest`'s response `.Content` property is a completely different **type** between editions: a `byte[]` on PowerShell 6+/Core, but a decoded `[string]` on Windows PowerShell 5.1 (.NET Framework). `New-CertBundle` assumed `.Content` was always bytes (`[System.Text.Encoding]::ASCII.GetString($bytes)`, then writing `$bytes` straight to a `FileStream`) — under 5.1 this would throw a method-binding error the moment it tried to download a cert, since neither call accepts a `[string]` argument. Added a `Get-ResponseBytes` helper that reads `.Content` directly on 6+/Core and falls back to `.RawContentStream.ToArray()` (the untouched raw response bytes) on 5.1. `#Requires` lowered from `7.0` to `5.1` now that both editions are genuinely supported; `powershell.exe -File configure_tools_windows.ps1` and `pwsh -File configure_tools_windows.ps1` both work identically. The one already-known 5.1 incompatibility (`Invoke-WebRequest -SkipCertificateCheck`, a PS6+-only parameter) was already correctly version-gated before this fix — this was the one gap that wasn't.
+- **`configure_tools_windows.ps1` lacked a UTF-8 byte-order mark**, which matters specifically for Windows PowerShell 5.1: without a BOM, 5.1 falls back to the system's default codepage to read a `.ps1` file, which can misdecode the script's non-ASCII characters (em dashes, box-drawing characters) used inside some string literals shown to the user. Added a BOM so the file is read correctly as UTF-8 on both editions.
+
+### Added
+- **CI now runs the PowerShell smoke tests under Windows PowerShell 5.1 (`powershell.exe`) as well as PowerShell 7+ (`pwsh`)** on `windows-latest`, plus a dedicated test that downloads a real public HTTPS PEM file and asserts the raw bytes come back correct on both editions — a direct, live check of the exact `.Content` type difference the fix above relies on, since there's no real Netskope tenant available in CI to exercise `New-CertBundle`'s actual download path end-to-end.
+
+### Changed
+- **README/docs updated to reflect PowerShell 5.1 support** — the Scripts Included table, Requirements section, and the Intune/generic-MDM deployment guides no longer describe pre-deploying PowerShell 7 as a prerequisite; Windows's built-in `powershell.exe` is sufficient on its own.
+- **`docs/deployment-intune.md`: expanded "Option B: Platform script" with the missing prerequisite step** — a platform script is a single uploaded `.ps1` with no way to attach a second file, so the `.pem` bundle has to already be staged on the device (e.g. via a trivial file-drop Win32 app, documented with a concrete example) before the platform script's `-CertBundle` default can point at it. Clarifies the read-from (staged path) vs. write-to (canonical per-user `certDir`/`certName`) distinction, since the script copies from one to the other before configuring any tool.
+
 ## [0.5.1] - 2026-07-23
 
 ### Fixed

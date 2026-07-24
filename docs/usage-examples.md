@@ -2,6 +2,8 @@
 
 [← Back to README](../README.md) · See [Parameters Reference](parameters-reference.md) for what each flag means.
 
+Every `pwsh -File ...` example below works identically with `powershell.exe -File ...` — `configure_tools_windows.ps1` runs on both Windows PowerShell 5.1 (built into Windows) and PowerShell 7+.
+
 ```sh
 # Interactive (no flags) — prompts for everything, sensible defaults offered
 ./configure_tools_mac.sh
