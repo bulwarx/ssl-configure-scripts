@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.5.2] - 2026-07-24
 
 ### Fixed
 - **`configure_tools_windows.ps1` didn't actually work on Windows PowerShell 5.1** despite `#Requires -Version 7.0` framing it as an active choice rather than a known gap — the real, non-obvious incompatibility was that `Invoke-WebRequest`'s response `.Content` property is a completely different **type** between editions: a `byte[]` on PowerShell 6+/Core, but a decoded `[string]` on Windows PowerShell 5.1 (.NET Framework). `New-CertBundle` assumed `.Content` was always bytes (`[System.Text.Encoding]::ASCII.GetString($bytes)`, then writing `$bytes` straight to a `FileStream`) — under 5.1 this would throw a method-binding error the moment it tried to download a cert, since neither call accepts a `[string]` argument. Added a `Get-ResponseBytes` helper that reads `.Content` directly on 6+/Core and falls back to `.RawContentStream.ToArray()` (the untouched raw response bytes) on 5.1. `#Requires` lowered from `7.0` to `5.1` now that both editions are genuinely supported; `powershell.exe -File configure_tools_windows.ps1` and `pwsh -File configure_tools_windows.ps1` both work identically. The one already-known 5.1 incompatibility (`Invoke-WebRequest -SkipCertificateCheck`, a PS6+-only parameter) was already correctly version-gated before this fix — this was the one gap that wasn't.
