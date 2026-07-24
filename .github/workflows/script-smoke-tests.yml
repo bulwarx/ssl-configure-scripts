@@ -183,7 +183,7 @@ jobs:
           $resp = Invoke-WebRequest -Uri 'https://curl.se/ca/cacert.pem' -UseBasicParsing
           if ($PSVersionTable.PSVersion.Major -ge 6) { $bytes = $resp.Content } else { $bytes = $resp.RawContentStream.ToArray() }
           Write-Host "PSVersion: $($PSVersionTable.PSVersion)  bytes.Length: $($bytes.Length)"
-          if ($bytes.Length -lt 1000) { Write-Error "unexpectedly small byte count — likely got a string, not raw bytes"; exit 1 }
+          if ($bytes.Length -lt 1000) { Write-Error "unexpectedly small byte count (likely got a string, not raw bytes)"; exit 1 }
           $text = [System.Text.Encoding]::ASCII.GetString($bytes)
           if ($text -notmatch '-----BEGIN CERTIFICATE-----') { Write-Error "downloaded bytes do not decode to a certificate"; exit 1 }
 
