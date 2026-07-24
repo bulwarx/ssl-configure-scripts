@@ -90,10 +90,7 @@ def get_shell():
 shell = get_shell()
 
 def command_exists(command):
-    if is_windows:
-        return shutil.which(command) is not None
-    return subprocess.call(['command', '-v', command],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
+    return shutil.which(command) is not None
 
 
 def get_persistent_env_var(var_name):
@@ -619,8 +616,16 @@ def create_cert_bundle():
         ok(f'Netskope-only cert saved: {netskope_only_path}')
 
 if existing_bundle:
-    # ─── Existing bundle: validate and use in place, no download ───────────
-    existing_bundle = os.path.normpath(os.path.expanduser(existing_bundle))
+    # ─── Existing bundle: validate, then copy to the canonical cert_dir/
+    # cert_name location (--cert-dir/--cert-name if given, else the same
+    # defaults as the download path) so every tool ends up configured
+    # against a stable path — not wherever the source file happened to
+    # live. This matters for MDM deployment: an Intune Win32 app's staged
+    # package content is deleted right after the install command finishes,
+    # so a script bundled alongside the cert just needs --cert-bundle
+    # pointing at its own package directory and this copies it out to
+    # somewhere permanent before that happens.
+    existing_bundle = os.path.abspath(os.path.expanduser(existing_bundle))
     if not os.path.isfile(existing_bundle):
         err(f'Certificate bundle not found: {existing_bundle}')
         sys.exit(1)
@@ -628,11 +633,29 @@ if existing_bundle:
         if b'-----BEGIN CERTIFICATE-----' not in f.read():
             err(f'{existing_bundle} does not contain a PEM certificate.')
             sys.exit(1)
-    cert_dir = os.path.dirname(existing_bundle)
-    cert_name = os.path.basename(existing_bundle)
+
+    cert_name = cli_cert_name or 'netskope-cert-bundle.pem'
+    cert_dir = os.path.abspath(os.path.expanduser(cli_cert_dir or '~/netskope'))
+    os.makedirs(cert_dir, exist_ok=True)
+    bundle_path = os.path.join(cert_dir, cert_name)
+
+    # Compare with normcase (case-insensitive on Windows) on already-absolute
+    # paths — a relative --cert-bundle that resolves to the same file as
+    # bundle_path must compare equal, or shutil.copy2 raises SameFileError.
+    if os.path.normcase(existing_bundle) != os.path.normcase(bundle_path):
+        try:
+            shutil.copy2(existing_bundle, bundle_path)
+        except OSError as e:
+            err(f'Failed to copy certificate bundle to: {bundle_path} ({e})')
+            sys.exit(1)
+        if not os.path.isfile(bundle_path):
+            err(f'Certificate bundle copy did not produce a file at: {bundle_path}')
+            sys.exit(1)
+        ok(f'Copied certificate bundle to: {bundle_path}')
+
     # Treat as freshly provided so Python/Java stores are (re)configured.
     cert_was_recreated = True
-    ok(f'Using existing certificate bundle: {existing_bundle}')
+    ok(f'Using existing certificate bundle: {bundle_path}')
 else:
     # ─── Download from Netskope ────────────────────────────────────────────
     cert_name = cli_cert_name or (

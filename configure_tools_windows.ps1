@@ -48,16 +48,29 @@
 .EXAMPLE
     pwsh -File .\configure_tools_windows.ps1 -CertBundle C:\netskope\bundle.pem
 .EXAMPLE
+    pwsh -File .\configure_tools_windows.ps1 C:\netskope\bundle.pem
+    A bare path with no -CertBundle name also works — it's the only
+    positional parameter this script accepts.
+.EXAMPLE
     pwsh -File .\configure_tools_windows.ps1 -TenantName mytenant.eu.goskope.com -OrgKey your-org-key
 #>
 
-[CmdletBinding()]
+## PositionalBinding=$false disables PowerShell's default "assign bare
+## arguments to parameters by declaration order" behavior for every
+## parameter except CertBundle (explicitly given Position 0 below). Without
+## this, `pwsh -File script.ps1 C:\bundle.pem` (a bare path, no -CertBundle
+## name) silently binds that path to -TenantName instead — CertBundle stays
+## empty, OrgKey stays empty, $silentRun evaluates false, and every prompt
+## fires. Only named parameters work for everything but the one positional
+## case we deliberately support (a bare bundle path).
+[CmdletBinding(PositionalBinding = $false)]
 param(
+    [Parameter(Position = 0)]
+    [string]$CertBundle   = "",     # set to an existing .pem path to skip the download entirely
     [string]$TenantName   = "",
     [string]$OrgKey       = "",
     [string]$CertName     = "netskope-cert-bundle.pem",
     [string]$CertDir      = "",     # leave empty to default to $env:USERPROFILE\netskope
-    [string]$CertBundle   = "",     # set to an existing .pem path to skip the download entirely
     [switch]$Recreate,
     [switch]$Rollback,
     [switch]$NetskopeOnly,
@@ -627,28 +640,54 @@ if ([string]::IsNullOrWhiteSpace($certBundle) -and -not $silentRun) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($certBundle)) {
-    # ─── Existing bundle: validate and use in place, no download ──────────────
-    $certPath = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certBundle))
-    if (-not (Test-Path $certPath -PathType Leaf)) {
-        Write-Err "Certificate bundle not found: $certPath"
+    # ─── Existing bundle: validate, then copy to the canonical certDir/
+    # certName location (-CertDir/-CertName if given, else the same
+    # defaults as the download path) so every tool ends up configured
+    # against a stable path — not wherever the source file happened to
+    # live. This matters for MDM deployment: an Intune Win32 app's staged
+    # package content is deleted right after the install command finishes,
+    # so a script bundled alongside the cert just needs -CertBundle
+    # pointing at its own package directory and this copies it out to
+    # somewhere permanent before that happens.
+    $srcPath = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certBundle))
+    if (-not (Test-Path $srcPath -PathType Leaf)) {
+        Write-Err "Certificate bundle not found: $srcPath"
         exit 1
     }
-    if ((Get-Content $certPath -Raw) -notmatch '-----BEGIN CERTIFICATE-----') {
-        Write-Err "$certPath does not contain a PEM certificate."
+    if ((Get-Content $srcPath -Raw) -notmatch '-----BEGIN CERTIFICATE-----') {
+        Write-Err "$srcPath does not contain a PEM certificate."
         exit 1
     }
-    $certDir  = Split-Path -Parent $certPath
-    $certName = Split-Path -Leaf   $certPath
+
+    if ([string]::IsNullOrWhiteSpace($certName)) { $certName = 'netskope-cert-bundle.pem' }
+    if ([string]::IsNullOrWhiteSpace($certDir))  { $certDir  = Join-Path $env:USERPROFILE 'netskope' }
+    $certDir  = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))
+    if (-not (Test-Path $certDir)) { New-Item -ItemType Directory -Path $certDir -Force | Out-Null }
+    $certPath = Join-Path $certDir $certName
+
+    if ($srcPath -ne $certPath) {
+        try {
+            Copy-Item -Path $srcPath -Destination $certPath -Force -ErrorAction Stop
+        } catch {
+            Write-Err "Failed to copy certificate bundle to: $certPath ($_)"
+            exit 1
+        }
+        if (-not (Test-Path $certPath -PathType Leaf)) {
+            Write-Err "Certificate bundle copy did not produce a file at: $certPath"
+            exit 1
+        }
+        Write-Ok "Copied certificate bundle to: $certPath"
+    }
     $certWasRecreated = $true   # treat as freshly provided so stores are (re)configured
     Write-Ok "Using existing certificate bundle: $certPath"
 } else {
     # ─── Download from Netskope ───────────────────────────────────────────────
     if ([string]::IsNullOrWhiteSpace($certName)) {
-        $certName = Read-Default 'Certificate bundle name' 'netskope-cert-bundle.pem'
+        $certName = if ($silentRun) { 'netskope-cert-bundle.pem' } else { Read-Default 'Certificate bundle name' 'netskope-cert-bundle.pem' }
     } else { Write-Log "certName: $certName" }
 
     if ([string]::IsNullOrWhiteSpace($certDir)) {
-        $certDir = Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope')
+        $certDir = if ($silentRun) { Join-Path $env:USERPROFILE 'netskope' } else { Read-Default 'Certificate bundle location' (Join-Path $env:USERPROFILE 'netskope') }
     } else { Write-Log "certDir: $certDir" }
 
     $certDir  = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($certDir))

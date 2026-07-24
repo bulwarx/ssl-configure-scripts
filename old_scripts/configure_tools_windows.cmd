@@ -1,4 +1,7 @@
 @echo off
+:: DEPRECATED — kept for historical reference only, not maintained or tested.
+:: Use configure_tools_windows.ps1 (PowerShell 7+) for Windows instead; see
+:: the main README for details.
 :: This tool will try to detect common cli tools and will configure the Netskope SSL certificate bundle.
 
 :: ANSI color setup (Windows 10 1511+ supports VT sequences in cmd)
@@ -17,11 +20,14 @@ if /i "%~1"=="rollback" goto :do_rollback
 :: roots). "full-bundle" is accepted as a no-op for backward compatibility
 :: since it is now the default.
 set fullBundle=1
-for %%a in (%*) do if /i "%%a"=="netskope-only" set fullBundle=0
 
 :: Parse named unattended-deployment flags: tenant-name=, org-key=,
-:: cert-name=, cert-dir=, cert-bundle=, recreate, create-replay. Any of
-:: these let this run skip the interactive prompt(s) they cover.
+:: cert-name=, cert-dir=, cert-bundle=, recreate, create-replay, plus the
+:: bare netskope-only flag. Uses a shift-based loop over %1, NOT
+:: `for %%a in (%*)` — that FOR form re-tokenizes the argument list on
+:: spaces even inside a quoted argument, breaking a value like
+:: "cert-bundle=C:\Program Files\bundle.pem" (quote the whole key=value
+:: pair for a path containing spaces).
 set "tenantName="
 set "orgKey="
 set "certName="
@@ -29,7 +35,13 @@ set "certDir="
 set "certBundle="
 set recreateFlag=0
 set createReplayFlag=0
-for %%a in (%*) do call :parse_arg "%%a"
+:parse_args_loop
+if "%~1"=="" goto :parse_args_done
+if /i "%~1"=="netskope-only" set fullBundle=0
+call :parse_arg "%~1"
+shift
+goto :parse_args_loop
+:parse_args_done
 
 :: Tenant + orgkey (download path) or an existing bundle path both mean this
 :: is a silent/unattended run — no prompt below should block it, even ones
@@ -555,7 +567,9 @@ goto :eof
 
 :: Parses one "key=value" or bare-flag argument for unattended deployment:
 :: tenant-name=, org-key=, cert-dir=, cert-name=, cert-bundle=, recreate,
-:: create-replay. Called once per %* argument from the top of the script.
+:: create-replay. Called once per argument via the shift-based loop at the
+:: top of the script. Quote the whole key=value pair for a value containing
+:: spaces, e.g. "cert-bundle=C:\Program Files\bundle.pem".
 :parse_arg
 set "arg=%~1"
 set "prefix=%arg:~0,12%"
